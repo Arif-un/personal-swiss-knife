@@ -1,0 +1,28 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider, createRouter } from "@tanstack/react-router";
+import { rootRoute } from "./routes/__root.tsx";
+import { indexRoute } from "./routes/index.tsx";
+import { pullRequestsRoute } from "./routes/pull-requests.tsx";
+import "./App.css";
+
+const routeTree = rootRoute.addChildren([indexRoute, pullRequestsRoute]);
+
+const router = createRouter({ routeTree });
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
+
+const queryClient = new QueryClient();
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  );
+}
+
+export default App;
