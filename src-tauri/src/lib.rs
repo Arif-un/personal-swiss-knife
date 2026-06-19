@@ -1,3 +1,5 @@
+mod ssh;
+
 use serde::Serialize;
 use std::process::Command;
 
@@ -67,7 +69,24 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, fetch_pull_requests])
+        .manage(ssh::session::SshState::new())
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            fetch_pull_requests,
+            ssh::commands::hosts_list,
+            ssh::commands::host_save,
+            ssh::commands::host_delete,
+            ssh::commands::ssh_build_command,
+            ssh::commands::ssh_set_passphrase,
+            ssh::commands::ssh_connect,
+            ssh::commands::ssh_trust_hostkey,
+            ssh::commands::ssh_write,
+            ssh::commands::ssh_resize,
+            ssh::commands::ssh_disconnect,
+            ssh::commands::forward_start,
+            ssh::commands::forward_stop,
+            ssh::commands::forwards_list,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

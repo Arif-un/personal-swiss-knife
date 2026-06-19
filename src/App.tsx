@@ -3,9 +3,10 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { rootRoute } from "./routes/__root.tsx";
 import { indexRoute } from "./routes/index.tsx";
 import { pullRequestsRoute } from "./routes/pull-requests.tsx";
+import { sshRoute } from "./routes/ssh.tsx";
 import "./App.css";
 
-const routeTree = rootRoute.addChildren([indexRoute, pullRequestsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, pullRequestsRoute, sshRoute]);
 
 const router = createRouter({ routeTree });
 

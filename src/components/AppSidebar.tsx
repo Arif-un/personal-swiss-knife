@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { HomeIcon, GitPullRequestIcon } from "lucide-react";
+import { HomeIcon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -18,6 +18,7 @@ import { ThemeSwitch } from "#components/ThemeSwitch.tsx";
 const navItems = [
   { title: "Home", path: "/", icon: HomeIcon },
   { title: "Pull Requests", path: "/pull-requests", icon: GitPullRequestIcon },
+  { title: "SSH", path: "/ssh", icon: TerminalIcon },
 ];
 
 export function AppSidebar() {
