@@ -5,6 +5,7 @@ export const sshApi = {
   hostsList: () => invoke<Host[]>("hosts_list"),
   hostSave: (host: Host) => invoke<string>("host_save", { host }),
   hostDelete: (host: Host) => invoke<void>("host_delete", { host }),
+  discoverHistory: () => invoke<Host[]>("discover_history_hosts"),
   buildCommand: (hostId: string) => invoke<string>("ssh_build_command", { hostId }),
   setPassphrase: (keyPath: string, secret: string) =>
     invoke<void>("ssh_set_passphrase", { keyPath, secret }),

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod commands;
 pub mod config;
+pub mod discover;
 pub mod forward;
 pub mod keychain;
 pub mod known_hosts;
