@@ -27,7 +27,7 @@ interface PullRequest {
 }
 
 function PullRequestsPage() {
-  const [repo, setRepo] = useState("netspringio/netspring");
+  const [repo, setRepo] = useState("");
   const [searchRepo, setSearchRepo] = useState(repo);
 
   const { data: prs, isLoading, error, refetch } = useQuery<PullRequest[]>({
