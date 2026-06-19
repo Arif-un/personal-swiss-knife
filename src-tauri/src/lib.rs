@@ -1,6 +1,5 @@
 use serde::Serialize;
 use std::process::Command;
-use tauri::Manager;
 
 #[derive(Serialize)]
 struct PullRequest {
@@ -69,15 +68,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet, fetch_pull_requests])
-        .setup(|app| {
-            let window = app.get_webview_window("main").unwrap();
-            #[cfg(target_os = "macos")]
-            {
-                use tauri::WebviewWindowExt;
-                let _ = window.set_traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0));
-            }
-            Ok(())
-        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

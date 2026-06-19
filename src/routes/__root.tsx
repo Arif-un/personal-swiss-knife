@@ -8,6 +8,7 @@ import {
   useSidebar,
 } from "#components/ui/sidebar.tsx";
 import { TooltipProvider } from "#components/ui/tooltip.tsx";
+import { ThemeProvider } from "#hooks/use-theme.tsx";
 import { cn } from "#lib/utils.ts";
 
 function Header() {
@@ -24,24 +25,26 @@ function Header() {
         state === "collapsed" && "pl-20",
       )}
     >
-      <SidebarTrigger />
+      <SidebarTrigger className="size-[18px] min-w-[18px] rounded-full p-0 [&_svg]:size-3" />
     </header>
   );
 }
 
 function RootLayout() {
   return (
-    <TooltipProvider>
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>
-          <Header />
-          <div className="flex-1 p-6">
-            <Outlet />
-          </div>
-        </SidebarInset>
-      </SidebarProvider>
-    </TooltipProvider>
+    <ThemeProvider>
+      <TooltipProvider>
+        <SidebarProvider>
+          <AppSidebar />
+          <SidebarInset className="bg-background">
+            <Header />
+            <div className="flex-1 p-6">
+              <Outlet />
+            </div>
+          </SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
+    </ThemeProvider>
   );
 }
 

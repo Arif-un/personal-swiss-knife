@@ -4,6 +4,7 @@ import { HomeIcon, GitPullRequestIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -12,6 +13,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "#components/ui/sidebar.tsx";
+import { ThemeSwitch } from "#components/ThemeSwitch.tsx";
 
 const navItems = [
   { title: "Home", path: "/", icon: HomeIcon },
@@ -55,6 +57,9 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <ThemeSwitch />
+      </SidebarFooter>
     </Sidebar>
   );
 }
