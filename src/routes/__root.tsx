@@ -36,9 +36,9 @@ function RootLayout() {
       <TooltipProvider>
         <SidebarProvider>
           <AppSidebar />
-          <SidebarInset className="bg-background">
+          <SidebarInset className="min-w-0 overflow-x-hidden bg-background">
             <Header />
-            <div className="flex-1 p-6">
+            <div className="min-w-0 flex-1 px-4 py-6">
               <Outlet />
             </div>
           </SidebarInset>
