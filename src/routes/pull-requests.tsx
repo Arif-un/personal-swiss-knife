@@ -1,8 +1,15 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-import { FlaskConical, Loader2, SlidersHorizontal, X } from "lucide-react";
+import {
+  FlaskConical,
+  Loader2,
+  RefreshCw,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { rootRoute } from "./__root.tsx";
 import { Input } from "#components/ui/input.tsx";
 import { Button } from "#components/ui/button.tsx";
@@ -16,6 +23,14 @@ import {
   TableHeader,
   TableRow,
 } from "#components/ui/table.tsx";
+import { prViewsApi } from "#components/pull-requests/api.ts";
+import { ViewsMenu } from "#components/pull-requests/ViewsMenu.tsx";
+import {
+  emptyFilters,
+  type Filters,
+  type PrView,
+  type PrViewsStore,
+} from "#components/pull-requests/types.ts";
 
 interface PullRequest {
   number: number;
@@ -30,30 +45,6 @@ interface PullRequest {
 }
 
 const CI_LABEL = "CI";
-
-interface Filters {
-  state: string;
-  author: string;
-  assignee: string;
-  labels: string;
-  base: string;
-  head: string;
-  search: string;
-  draftOnly: boolean;
-  limit: number;
-}
-
-const emptyFilters: Filters = {
-  state: "open",
-  author: "",
-  assignee: "",
-  labels: "",
-  base: "",
-  head: "",
-  search: "",
-  draftOnly: false,
-  limit: 30,
-};
 
 function countActive(f: Filters): number {
   let n = 0;
@@ -112,6 +103,19 @@ function PullRequestsPage() {
     enabled: searchRepo.trim().length > 0,
   });
 
+  // How many times the CI label was added to each PR (keyed by PR number).
+  const prNumbers = prs?.map((p) => p.number) ?? [];
+  const ciCountsQuery = useQuery<Record<string, number>>({
+    queryKey: ["ci-label-counts", searchRepo, prNumbers],
+    queryFn: () =>
+      invoke<Record<string, number>>("fetch_ci_label_counts", {
+        repo: searchRepo,
+        numbers: prNumbers,
+      }),
+    enabled: searchRepo.trim().length > 0 && prNumbers.length > 0,
+  });
+  const ciCounts = ciCountsQuery.data ?? {};
+
   // Adds the CI label; if already present it is removed then re-added to force
   // a fresh label event. Backend returns the PR's labels after the operation.
   const ciMutation = useMutation({
@@ -121,8 +125,99 @@ function PullRequestsPage() {
       queryClient.setQueryData<PullRequest[]>(prsQueryKey, (prev) =>
         prev?.map((pr) => (pr.number === number ? { ...pr, labels } : pr)),
       );
+      // Each re-add produces one more "labeled" event; refresh the counts.
+      queryClient.invalidateQueries({
+        queryKey: ["ci-label-counts", searchRepo],
+      });
     },
   });
+
+  // ---- Saved views ----
+  const viewsQuery = useQuery<PrViewsStore>({
+    queryKey: ["pr-views"],
+    queryFn: () => prViewsApi.list(),
+  });
+  const views = viewsQuery.data?.views ?? [];
+  const activeViewId = viewsQuery.data?.activeViewId ?? null;
+
+  const invalidateViews = () =>
+    queryClient.invalidateQueries({ queryKey: ["pr-views"] });
+
+  const saveViewMutation = useMutation({
+    mutationFn: prViewsApi.save,
+    onSuccess: invalidateViews,
+  });
+  const deleteViewMutation = useMutation({
+    mutationFn: prViewsApi.delete,
+    onSuccess: invalidateViews,
+  });
+  const setActiveMutation = useMutation({
+    mutationFn: prViewsApi.setActive,
+    onSuccess: invalidateViews,
+  });
+  const viewsBusy =
+    viewsQuery.isLoading ||
+    saveViewMutation.isPending ||
+    deleteViewMutation.isPending ||
+    setActiveMutation.isPending;
+
+  // Populate the page from a view and fetch immediately.
+  function loadView(view: PrView) {
+    const f = { ...emptyFilters, ...view.filters };
+    setRepo(view.repo);
+    setFilters(f);
+    setSearchRepo(view.repo);
+    setAppliedFilters(f);
+  }
+
+  function applyView(view: PrView) {
+    loadView(view);
+    if (view.id !== activeViewId) setActiveMutation.mutate(view.id);
+  }
+
+  function saveCurrentAsView(name: string) {
+    saveViewMutation.mutate({ name, repo: searchRepo, filters: appliedFilters });
+  }
+
+  function updateViewToCurrent(view: PrView) {
+    saveViewMutation.mutate({
+      id: view.id,
+      name: view.name,
+      repo: searchRepo,
+      filters: appliedFilters,
+    });
+  }
+
+  function renameView(view: PrView, name: string) {
+    saveViewMutation.mutate({ ...view, name });
+  }
+
+  function deleteView(view: PrView) {
+    deleteViewMutation.mutate(view.id);
+  }
+
+  // On first load, restore the last-active view and fetch it.
+  const didInitView = useRef(false);
+  useEffect(() => {
+    if (didInitView.current || !viewsQuery.data) return;
+    didInitView.current = true;
+    const active = viewsQuery.data.views.find(
+      (v) => v.id === viewsQuery.data!.activeViewId,
+    );
+    if (!active) return;
+    const f = { ...emptyFilters, ...active.filters };
+    setRepo(active.repo);
+    setFilters(f);
+    setSearchRepo(active.repo);
+    setAppliedFilters(f);
+  }, [viewsQuery.data]);
+
+  // The header actions slot lives in the global header (see __root.tsx); we
+  // portal the views menu into it so it only mounts on this route.
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setHeaderSlot(document.getElementById("header-actions"));
+  }, []);
 
   function commit() {
     setSearchRepo(repo);
@@ -156,16 +251,33 @@ function PullRequestsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => refetch()}
-          disabled={!searchRepo.trim() || isFetching}
-        >
-          Refresh
-        </Button>
-      </div>
+      {headerSlot &&
+        createPortal(
+          <>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => refetch()}
+              disabled={!searchRepo.trim() || isFetching}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshCw className={isFetching ? "animate-spin" : undefined} />
+            </Button>
+            <ViewsMenu
+              views={views}
+              activeViewId={activeViewId}
+              canSaveCurrent={searchRepo.trim().length > 0}
+              busy={viewsBusy}
+              onApply={applyView}
+              onSaveCurrent={saveCurrentAsView}
+              onUpdate={updateViewToCurrent}
+              onRename={renameView}
+              onDelete={deleteView}
+            />
+          </>,
+          headerSlot,
+        )}
 
       <div className="flex flex-col gap-3">
         <form onSubmit={handleSearch} className="flex gap-2">
@@ -325,7 +437,7 @@ function PullRequestsPage() {
 
       {prs && (
         <div className="rounded-md border">
-          <Table>
+          <Table className="text-[10px]">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-16">#</TableHead>
@@ -355,6 +467,7 @@ function PullRequestsPage() {
                 );
                 const isCiPending =
                   ciMutation.isPending && ciMutation.variables === pr.number;
+                const ciCount = ciCounts[String(pr.number)] ?? 0;
                 return (
                   <TableRow key={pr.number}>
                     <TableCell className="font-mono text-muted-foreground">
@@ -385,29 +498,39 @@ function PullRequestsPage() {
                       {formatDate(pr.createdAt)}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => ciMutation.mutate(pr.number)}
-                        disabled={isCiPending}
-                        aria-pressed={hasCi}
-                        title={
-                          hasCi
-                            ? "Re-add CI label (removes then adds it again)"
-                            : "Add CI label"
-                        }
-                        className={
-                          hasCi
-                            ? "text-blue-500"
-                            : "opacity-40 hover:opacity-100"
-                        }
-                      >
-                        {isCiPending ? (
-                          <Loader2 className="animate-spin" />
-                        ) : (
-                          <FlaskConical />
+                      <div className="relative inline-flex">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => ciMutation.mutate(pr.number)}
+                          disabled={isCiPending}
+                          aria-pressed={hasCi}
+                          title={
+                            hasCi
+                              ? `Re-add CI label (added ${ciCount}× so far)`
+                              : `Add CI label${ciCount ? ` (added ${ciCount}× so far)` : ""}`
+                          }
+                          className={
+                            hasCi
+                              ? "text-blue-500"
+                              : "opacity-40 hover:opacity-100"
+                          }
+                        >
+                          {isCiPending ? (
+                            <Loader2 className="animate-spin" />
+                          ) : (
+                            <FlaskConical />
+                          )}
+                        </Button>
+                        {ciCount > 0 && (
+                          <Badge
+                            variant="secondary"
+                            className="pointer-events-none absolute -right-1 -top-1 h-4 min-w-4 justify-center rounded-full px-1 text-[9px] leading-none tabular-nums"
+                          >
+                            {ciCount}
+                          </Badge>
                         )}
-                      </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

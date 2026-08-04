@@ -46,6 +46,8 @@ function Header() {
           </span>
         )}
       </span>
+      {/* Portal target for page-specific header actions (e.g. PR views menu). */}
+      <div id="header-actions" className="ml-auto flex items-center gap-2" />
     </header>
   );
 }
