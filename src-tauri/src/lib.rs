@@ -141,6 +141,7 @@ pub fn run() {
             ssh::commands::hosts_list,
             ssh::commands::host_save,
             ssh::commands::host_delete,
+            ssh::commands::discover_history_hosts,
             ssh::commands::ssh_build_command,
             ssh::commands::ssh_set_passphrase,
             ssh::commands::ssh_connect,

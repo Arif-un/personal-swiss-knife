@@ -1,6 +1,7 @@
 import {
   ArrowRightLeftIcon,
   CopyIcon,
+  HistoryIcon,
   PencilIcon,
   PlusIcon,
   ServerIcon,
@@ -19,16 +20,31 @@ interface Props {
   onEdit: (host: Host) => void;
   onDelete: (host: Host) => void;
   onCopyCommand: (host: Host) => void;
+  onImport: () => void;
 }
 
-export function HostList({ hosts, loading, onConnect, onAdd, onEdit, onDelete, onCopyCommand }: Props) {
+export function HostList({
+  hosts,
+  loading,
+  onConnect,
+  onAdd,
+  onEdit,
+  onDelete,
+  onCopyCommand,
+  onImport,
+}: Props) {
   return (
     <div className="flex h-full w-64 shrink-0 flex-col border-r">
       <div className="flex items-center justify-between px-3 py-3">
         <span className="text-sm font-semibold">Hosts</span>
-        <Button variant="outline" size="icon-xs" onClick={onAdd} aria-label="Add host">
-          <PlusIcon />
-        </Button>
+        <div className="flex gap-1">
+          <Button variant="outline" size="icon-xs" onClick={onImport} aria-label="Import from shell history">
+            <HistoryIcon />
+          </Button>
+          <Button variant="outline" size="icon-xs" onClick={onAdd} aria-label="Add host">
+            <PlusIcon />
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2">

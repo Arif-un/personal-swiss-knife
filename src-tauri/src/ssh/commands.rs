@@ -44,6 +44,18 @@ pub fn host_delete(app: AppHandle, host: Host) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn discover_history_hosts(app: AppHandle) -> Result<Vec<Host>, String> {
+    let existing = all_hosts(&app)?;
+    let mut found = crate::ssh::discover::discover_hosts();
+    found.retain(|h| {
+        !existing
+            .iter()
+            .any(|e| e.hostname == h.hostname && e.user == h.user)
+    });
+    Ok(found)
+}
+
+#[tauri::command]
 pub fn ssh_build_command(app: AppHandle, host_id: String) -> Result<String, String> {
     let host = all_hosts(&app)?
         .into_iter()

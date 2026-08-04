@@ -10,6 +10,7 @@ import { sshApi } from "#components/ssh/api.ts";
 import { HostList } from "#components/ssh/HostList.tsx";
 import { HostForm } from "#components/ssh/HostForm.tsx";
 import { HostKeyDialog } from "#components/ssh/HostKeyDialog.tsx";
+import { ImportDialog } from "#components/ssh/ImportDialog.tsx";
 import { TerminalView } from "#components/ssh/TerminalView.tsx";
 import { ForwardsPanel } from "#components/ssh/ForwardsPanel.tsx";
 import { emptyHost, type Host, type HostKeyPrompt } from "#components/ssh/types.ts";
@@ -31,6 +32,7 @@ function SshPage() {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<Host | null>(null);
+  const [importing, setImporting] = useState<Host[] | null>(null);
   const [prompt, setPrompt] = useState<HostKeyPrompt | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -81,6 +83,26 @@ function SshPage() {
     }
   }
 
+  async function openImport() {
+    try {
+      const found = await sshApi.discoverHistory();
+      setImporting(found);
+    } catch (err) {
+      flash(String(err));
+    }
+  }
+
+  async function importHosts(hosts: Host[]) {
+    try {
+      for (const h of hosts) await sshApi.hostSave(h);
+      setImporting(null);
+      qc.invalidateQueries({ queryKey: ["ssh-hosts"] });
+      flash(`Imported ${hosts.length} host${hosts.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      flash(String(err));
+    }
+  }
+
   async function copyCommand(host: Host) {
     try {
       const cmd = await sshApi.buildCommand(host.id);
@@ -110,6 +132,7 @@ function SshPage() {
           onEdit={(h) => setEditing(h)}
           onDelete={deleteHost}
           onCopyCommand={copyCommand}
+          onImport={openImport}
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -177,6 +200,9 @@ function SshPage() {
 
       {editing && (
         <HostForm initial={editing} onSave={saveHost} onClose={() => setEditing(null)} />
+      )}
+      {importing && (
+        <ImportDialog found={importing} onImport={importHosts} onClose={() => setImporting(null)} />
       )}
       {prompt && <HostKeyDialog prompt={prompt} onDecide={decideHostkey} />}
       {toast && (
