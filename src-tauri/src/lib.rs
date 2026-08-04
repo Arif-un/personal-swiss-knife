@@ -16,7 +16,10 @@ struct PullRequest {
     #[serde(rename = "isDraft")]
     is_draft: bool,
     state: String,
+    labels: Vec<String>,
 }
+
+const CI_LABEL: &str = "ci";
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +95,7 @@ fn fetch_pull_requests(
     args.push(f.limit.filter(|n| *n > 0).unwrap_or(30).to_string());
 
     args.push("--json".into());
-    args.push("number,title,author,createdAt,url,isDraft,headRefName,state".into());
+    args.push("number,title,author,createdAt,url,isDraft,headRefName,state,labels".into());
 
     let output = Command::new("gh")
         .args(&args)
@@ -119,10 +122,83 @@ fn fetch_pull_requests(
             head_ref_name: v["headRefName"].as_str().unwrap_or("").to_string(),
             is_draft: v["isDraft"].as_bool().unwrap_or(false),
             state: v["state"].as_str().unwrap_or("").to_string(),
+            labels: label_names(&v["labels"]),
         })
         .collect();
 
     Ok(prs)
+}
+
+/// Extract label name strings from a gh `labels` JSON array.
+fn label_names(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|l| l["name"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Fetch the current label names for a single PR.
+fn fetch_pr_labels(repo: &str, number: u64) -> Result<Vec<String>, String> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            &number.to_string(),
+            "--repo",
+            repo,
+            "--json",
+            "labels",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run gh CLI: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh command failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+    Ok(label_names(&v["labels"]))
+}
+
+/// Run `gh pr edit` with a single label flag (`--add-label` / `--remove-label`).
+fn edit_pr_label(repo: &str, number: u64, flag: &str, label: &str) -> Result<(), String> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "edit",
+            &number.to_string(),
+            "--repo",
+            repo,
+            flag,
+            label,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run gh CLI: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh command failed: {stderr}"));
+    }
+    Ok(())
+}
+
+/// Add the CI label to a PR. If it is already present, remove it first and
+/// re-add it (forces a fresh label event). Returns the PR's labels afterwards.
+#[tauri::command]
+fn readd_ci_label(repo: String, number: u64) -> Result<Vec<String>, String> {
+    let labels = fetch_pr_labels(&repo, number)?;
+    if labels.iter().any(|l| l == CI_LABEL) {
+        edit_pr_label(&repo, number, "--remove-label", CI_LABEL)?;
+    }
+    edit_pr_label(&repo, number, "--add-label", CI_LABEL)?;
+    fetch_pr_labels(&repo, number)
 }
 
 #[tauri::command]
@@ -138,6 +214,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             fetch_pull_requests,
+            readd_ci_label,
             ssh::commands::hosts_list,
             ssh::commands::host_save,
             ssh::commands::host_delete,

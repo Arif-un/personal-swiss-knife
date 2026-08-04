@@ -1,6 +1,11 @@
-import { Outlet, createRootRoute } from "@tanstack/react-router";
+import {
+  Outlet,
+  createRootRoute,
+  useRouterState,
+} from "@tanstack/react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppSidebar } from "#components/AppSidebar.tsx";
+import { ChevronRightIcon } from "lucide-react";
+import { AppSidebar, navItems } from "#components/AppSidebar.tsx";
 import {
   SidebarInset,
   SidebarProvider,
@@ -13,6 +18,10 @@ import { cn } from "#lib/utils.ts";
 
 function Header() {
   const { state } = useSidebar();
+  const pathname = useRouterState({
+    select: (s) => s.location.pathname,
+  });
+  const title = navItems.find((item) => item.path === pathname)?.title;
 
   return (
     <header
@@ -22,10 +31,21 @@ function Header() {
       }}
       className={cn(
         "flex h-12 shrink-0 items-center gap-2 border-b px-4 transition-[padding] duration-200",
-        state === "collapsed" && "pl-20",
+        state === "collapsed" && "pl-21",
       )}
     >
-      <SidebarTrigger className="size-[18px] min-w-[18px] rounded-full p-0 [&_svg]:size-3" />
+      {state === "collapsed" && (
+        <SidebarTrigger className="size-[18px] min-w-[18px] rounded-full p-0 [&_svg]:size-3.5 -mt-0.5 cursor-pointer" />
+      )}
+      <span className="flex items-center gap-1 text-lg font-bold">
+        Swiss Knife
+        {title && title !== "Home" && (
+          <span className="flex items-center gap-1 font-normal text-muted-foreground">
+            <ChevronRightIcon className="size-4" />
+            {title}
+          </span>
+        )}
+      </span>
     </header>
   );
 }

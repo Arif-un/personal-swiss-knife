@@ -12,10 +12,11 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarTrigger,
 } from "#components/ui/sidebar.tsx";
 import { ThemeSwitch } from "#components/ThemeSwitch.tsx";
 
-const navItems = [
+export const navItems = [
   { title: "Home", path: "/", icon: HomeIcon },
   { title: "Pull Requests", path: "/pull-requests", icon: GitPullRequestIcon },
   { title: "SSH", path: "/ssh", icon: TerminalIcon },
@@ -28,14 +29,13 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader
+        className="h-12 flex-row items-center py-0 pl-21"
         onMouseDown={(e) => {
           if ((e.target as HTMLElement).closest("button, a, input")) return;
           getCurrentWindow().startDragging();
         }}
       >
-        <div className="mt-6 flex items-center gap-2 px-2 py-1">
-          <span className="text-lg font-bold">Swiss Knife</span>
-        </div>
+        <SidebarTrigger className="size-[18px] min-w-[18px] -mt-0.5 rounded-full p-0 cursor-pointer hover:bg-slate-500/30" />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

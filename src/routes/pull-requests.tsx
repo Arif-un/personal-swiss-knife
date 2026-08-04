@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { createRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-import { SlidersHorizontal, X } from "lucide-react";
+import { FlaskConical, Loader2, SlidersHorizontal, X } from "lucide-react";
 import { rootRoute } from "./__root.tsx";
 import { Input } from "#components/ui/input.tsx";
 import { Button } from "#components/ui/button.tsx";
@@ -26,7 +26,10 @@ interface PullRequest {
   headRefName: string;
   isDraft: boolean;
   state: string;
+  labels: string[];
 }
+
+const CI_LABEL = "CI";
 
 interface Filters {
   state: string;
@@ -90,6 +93,9 @@ function PullRequestsPage() {
   const [searchRepo, setSearchRepo] = useState("");
   const [appliedFilters, setAppliedFilters] = useState<Filters>(emptyFilters);
 
+  const queryClient = useQueryClient();
+  const prsQueryKey = ["pull-requests", searchRepo, appliedFilters];
+
   const {
     data: prs,
     isLoading,
@@ -97,13 +103,25 @@ function PullRequestsPage() {
     error,
     refetch,
   } = useQuery<PullRequest[]>({
-    queryKey: ["pull-requests", searchRepo, appliedFilters],
+    queryKey: prsQueryKey,
     queryFn: () =>
       invoke<PullRequest[]>("fetch_pull_requests", {
         repo: searchRepo,
         filters: appliedFilters,
       }),
     enabled: searchRepo.trim().length > 0,
+  });
+
+  // Adds the CI label; if already present it is removed then re-added to force
+  // a fresh label event. Backend returns the PR's labels after the operation.
+  const ciMutation = useMutation({
+    mutationFn: (number: number) =>
+      invoke<string[]>("readd_ci_label", { repo: searchRepo, number }),
+    onSuccess: (labels, number) => {
+      queryClient.setQueryData<PullRequest[]>(prsQueryKey, (prev) =>
+        prev?.map((pr) => (pr.number === number ? { ...pr, labels } : pr)),
+      );
+    },
   });
 
   function commit() {
@@ -139,7 +157,6 @@ function PullRequestsPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Pull Requests</h1>
         <Button
           variant="outline"
           size="sm"
@@ -298,6 +315,14 @@ function PullRequestsPage() {
         </div>
       )}
 
+      {ciMutation.isError && (
+        <div className="rounded-md border border-destructive p-4 text-destructive">
+          {ciMutation.error instanceof Error
+            ? ciMutation.error.message
+            : "Failed to update CI label"}
+        </div>
+      )}
+
       {prs && (
         <div className="rounded-md border">
           <Table>
@@ -309,13 +334,14 @@ function PullRequestsPage() {
                 <TableHead className="w-32">Branch</TableHead>
                 <TableHead className="w-24">Status</TableHead>
                 <TableHead className="w-28">Date</TableHead>
+                <TableHead className="w-12 text-center">CI</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {prs.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-center text-muted-foreground"
                   >
                     No pull requests match these filters.
@@ -324,6 +350,11 @@ function PullRequestsPage() {
               )}
               {prs.map((pr) => {
                 const badge = stateBadge(pr);
+                const hasCi = pr.labels.some(
+                  (l) => l.toLowerCase() === CI_LABEL.toLowerCase(),
+                );
+                const isCiPending =
+                  ciMutation.isPending && ciMutation.variables === pr.number;
                 return (
                   <TableRow key={pr.number}>
                     <TableCell className="font-mono text-muted-foreground">
@@ -352,6 +383,31 @@ function PullRequestsPage() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDate(pr.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => ciMutation.mutate(pr.number)}
+                        disabled={isCiPending}
+                        aria-pressed={hasCi}
+                        title={
+                          hasCi
+                            ? "Re-add CI label (removes then adds it again)"
+                            : "Add CI label"
+                        }
+                        className={
+                          hasCi
+                            ? "text-blue-500"
+                            : "opacity-40 hover:opacity-100"
+                        }
+                      >
+                        {isCiPending ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          <FlaskConical />
+                        )}
+                      </Button>
                     </TableCell>
                   </TableRow>
                 );

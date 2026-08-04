@@ -120,6 +120,7 @@
 @layer base {
   * {
     @apply border-border outline-ring/100;
+    corner-shape: "squircle";
   }
   body {
     @apply text-foreground;
