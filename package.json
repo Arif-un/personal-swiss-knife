@@ -14,6 +14,8 @@
     "lint:fix": "oxlint --fix",
     "format": "oxfmt --write src",
     "format:check": "oxfmt --check src",
+    "fix": "oxfmt --write src && oxlint --fix && cargo fmt --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --fix --allow-dirty --allow-staged",
+    "check": "oxfmt --check src && oxlint && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "tauri": "tauri"
   },
   "dependencies": {
