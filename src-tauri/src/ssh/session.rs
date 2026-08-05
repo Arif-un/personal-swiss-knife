@@ -11,7 +11,14 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::ssh::forward::ForwardHandle;
 use crate::ssh::known_hosts::HostKeyStatus;
-use crate::ssh::{config, current_user, expand_tilde, keychain, known_hosts, Host, SshError, SshResult};
+use crate::ssh::{
+    config, current_user, expand_tilde, keychain, known_hosts, Host, SshError, SshResult,
+    DEFAULT_BIND_ADDR, EVENT_SSH_CLOSED, EVENT_SSH_DATA, EVENT_SSH_HOSTKEY,
+};
+
+/// How long a connect waits for the user to answer an unknown-host-key prompt
+/// before giving up (and treating the host as untrusted).
+const HOSTKEY_PROMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Commands sent to a session's owning task.
 pub enum SessionCmd {
@@ -108,7 +115,7 @@ impl client::Handler for Client {
                 let fingerprint = server_public_key.fingerprint(russh::keys::HashAlg::Sha256).to_string();
                 let algorithm = server_public_key.algorithm().as_str().to_string();
                 let _ = self.app.emit(
-                    "ssh://hostkey",
+                    EVENT_SSH_HOSTKEY,
                     HostKeyPrompt {
                         prompt_id: self.prompt_id.clone(),
                         host: self.host.clone(),
@@ -116,7 +123,15 @@ impl client::Handler for Client {
                         algorithm,
                     },
                 );
-                let trust = rx.await.unwrap_or(false);
+                // Bounded wait: if the user never answers, treat as untrusted and
+                // drop the pending prompt so it can't leak or block forever.
+                let trust = match tokio::time::timeout(HOSTKEY_PROMPT_TIMEOUT, rx).await {
+                    Ok(Ok(answer)) => answer,
+                    Ok(Err(_)) | Err(_) => {
+                        self.hostkey_prompts.lock().await.remove(&self.prompt_id);
+                        false
+                    }
+                };
                 if trust {
                     known_hosts::learn(&self.host, self.port, server_public_key);
                 }
@@ -238,7 +253,7 @@ pub async fn connect(
                 .channel_open_direct_tcpip(
                     host.hostname.clone(),
                     host.port as u32,
-                    "127.0.0.1".to_string(),
+                    DEFAULT_BIND_ADDR.to_string(),
                     0,
                 )
                 .await?;
@@ -301,10 +316,10 @@ pub async fn connect(
                 },
                 msg = channel.wait() => match msg {
                     Some(ChannelMsg::Data { data }) => {
-                        let _ = app2.emit("ssh://data", SshData { session_id: sid.clone(), bytes: data.to_vec() });
+                        let _ = app2.emit(EVENT_SSH_DATA, SshData { session_id: sid.clone(), bytes: data.to_vec() });
                     }
                     Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        let _ = app2.emit("ssh://data", SshData { session_id: sid.clone(), bytes: data.to_vec() });
+                        let _ = app2.emit(EVENT_SSH_DATA, SshData { session_id: sid.clone(), bytes: data.to_vec() });
                     }
                     Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
                     _ => {}
@@ -312,10 +327,16 @@ pub async fn connect(
             }
         }
         let _ = app2.emit(
-            "ssh://closed",
+            EVENT_SSH_CLOSED,
             SshClosed { session_id: sid.clone(), reason: "disconnected".into() },
         );
-        sessions.lock().await.remove(&sid);
+        // Abort any port-forward listeners so they don't outlive the session
+        // (dropping a JoinHandle only detaches it, leaving the port bound).
+        if let Some(mut entry) = sessions.lock().await.remove(&sid) {
+            for (_, f) in entry.forwards.drain() {
+                f.task.abort();
+            }
+        }
     });
 
     Ok(session_id)

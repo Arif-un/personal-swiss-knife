@@ -1,6 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::ssh::{ForwardSpec, Host, SshError, SshResult};
+use crate::ssh::{
+    ForwardSpec, Host, HostSource, SshResult, DEFAULT_BIND_ADDR, DEFAULT_SSH_PORT,
+};
 
 /// Path to `~/.ssh/config`.
 pub fn ssh_config_path() -> SshResult<PathBuf> {
@@ -21,9 +23,17 @@ struct Parsed {
     blocks: Vec<Block>,
 }
 
-fn parse(path: &PathBuf) -> Parsed {
-    let content = std::fs::read_to_string(path).unwrap_or_default();
-    let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+/// Read a config file into lines. A missing file is an empty document; any other
+/// IO error is surfaced so callers never overwrite a file they failed to read.
+fn read_config_lines(path: &Path) -> SshResult<Vec<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(content.lines().map(|l| l.to_string()).collect()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn parse_lines(lines: Vec<String>) -> Parsed {
     let mut blocks: Vec<Block> = Vec::new();
 
     let mut i = 0;
@@ -31,7 +41,7 @@ fn parse(path: &PathBuf) -> Parsed {
         let trimmed = lines[i].trim();
         let lower = trimmed.to_lowercase();
         if lower.starts_with("host ") || lower == "host" {
-            let alias = trimmed[4..].trim().split_whitespace().next().unwrap_or("").to_string();
+            let alias = trimmed[4..].split_whitespace().next().unwrap_or("").to_string();
             let start = i;
             i += 1;
             while i < lines.len() {
@@ -54,19 +64,16 @@ fn parse(path: &PathBuf) -> Parsed {
     Parsed { lines, blocks }
 }
 
+fn parse_file(path: &Path) -> SshResult<Parsed> {
+    Ok(parse_lines(read_config_lines(path)?))
+}
+
 fn block_to_host(alias: &str, body: &[String]) -> Host {
     let mut host = Host {
         id: format!("cfg:{alias}"),
-        source: "ssh-config".into(),
+        source: HostSource::SshConfig,
         alias: alias.to_string(),
-        hostname: String::new(),
-        user: String::new(),
-        port: 22,
-        identity_file: None,
-        use_agent: true,
-        proxy_jump: None,
-        forwards: Vec::new(),
-        extra_options: None,
+        ..Host::default()
     };
     let mut extra: Vec<String> = Vec::new();
 
@@ -82,7 +89,7 @@ fn block_to_host(alias: &str, body: &[String]) -> Host {
         match key.to_lowercase().as_str() {
             "hostname" => host.hostname = value.to_string(),
             "user" => host.user = value.to_string(),
-            "port" => host.port = value.parse().unwrap_or(22),
+            "port" => host.port = value.parse().unwrap_or(DEFAULT_SSH_PORT),
             "identityfile" => host.identity_file = Some(value.to_string()),
             "proxyjump" => host.proxy_jump = Some(value.to_string()),
             "localforward" => {
@@ -110,7 +117,7 @@ fn parse_local_forward(value: &str) -> Option<ForwardSpec> {
 
     let (bind_addr, bind_port) = match local.rsplit_once(':') {
         Some((addr, port)) => (addr.to_string(), port.parse().ok()?),
-        None => ("127.0.0.1".to_string(), local.parse().ok()?),
+        None => (DEFAULT_BIND_ADDR.to_string(), local.parse().ok()?),
     };
     let (dest_host, dest_port) = remote.rsplit_once(':')?;
     Some(ForwardSpec {
@@ -122,13 +129,17 @@ fn parse_local_forward(value: &str) -> Option<ForwardSpec> {
     })
 }
 
-/// All hosts defined in `~/.ssh/config`.
+/// All hosts defined in `~/.ssh/config`. Read failures yield an empty list so a
+/// broken config never blocks listing app-owned hosts.
 pub fn parse_ssh_config() -> Vec<Host> {
     let path = match ssh_config_path() {
         Ok(p) => p,
         Err(_) => return Vec::new(),
     };
-    parse(&path).blocks.into_iter().map(|b| b.host).collect()
+    match parse_file(&path) {
+        Ok(parsed) => parsed.blocks.into_iter().map(|b| b.host).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Render a host as an OpenSSH `Host` block (indented body).
@@ -140,7 +151,7 @@ fn render_block(host: &Host) -> Vec<String> {
     if !host.user.is_empty() {
         out.push(format!("    User {}", host.user));
     }
-    if host.port != 22 {
+    if host.port != DEFAULT_SSH_PORT {
         out.push(format!("    Port {}", host.port));
     }
     if let Some(id) = &host.identity_file {
@@ -170,10 +181,11 @@ fn render_block(host: &Host) -> Vec<String> {
     out
 }
 
-fn backup_and_write(path: &PathBuf, lines: &[String]) -> SshResult<()> {
+fn backup_and_write(path: &Path, lines: &[String]) -> SshResult<()> {
     if path.exists() {
+        // Fail rather than overwrite a file we could not back up.
         let backup = path.with_extension("bak-swissknife");
-        let _ = std::fs::copy(path, &backup);
+        std::fs::copy(path, &backup)?;
     } else if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -187,7 +199,7 @@ fn backup_and_write(path: &PathBuf, lines: &[String]) -> SshResult<()> {
 /// (preserving every other byte), or append a new managed block.
 pub fn write_host_block(host: &Host) -> SshResult<()> {
     let path = ssh_config_path()?;
-    let mut parsed = parse(&path);
+    let mut parsed = parse_file(&path)?;
     let rendered = render_block(host);
 
     if let Some(block) = parsed.blocks.iter().find(|b| b.alias == host.alias) {
@@ -205,7 +217,7 @@ pub fn write_host_block(host: &Host) -> SshResult<()> {
 /// Remove a host's block from `~/.ssh/config`.
 pub fn delete_host_block(alias: &str) -> SshResult<()> {
     let path = ssh_config_path()?;
-    let mut parsed = parse(&path);
+    let mut parsed = parse_file(&path)?;
     if let Some(block) = parsed.blocks.iter().find(|b| b.alias == alias) {
         let (start, end) = (block.start, block.end);
         parsed.lines.splice(start..end, std::iter::empty());
@@ -216,7 +228,7 @@ pub fn delete_host_block(alias: &str) -> SshResult<()> {
 
 // ---- app-owned host store (JSON) ----
 
-pub fn load_app_hosts(store_path: &PathBuf) -> SshResult<Vec<Host>> {
+pub fn load_app_hosts(store_path: &Path) -> SshResult<Vec<Host>> {
     if !store_path.exists() {
         return Ok(Vec::new());
     }
@@ -228,7 +240,7 @@ pub fn load_app_hosts(store_path: &PathBuf) -> SshResult<Vec<Host>> {
     Ok(hosts)
 }
 
-pub fn save_app_hosts(store_path: &PathBuf, hosts: &[Host]) -> SshResult<()> {
+pub fn save_app_hosts(store_path: &Path, hosts: &[Host]) -> SshResult<()> {
     if let Some(parent) = store_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -237,9 +249,9 @@ pub fn save_app_hosts(store_path: &PathBuf, hosts: &[Host]) -> SshResult<()> {
     Ok(())
 }
 
-pub fn upsert_app_host(store_path: &PathBuf, mut host: Host) -> SshResult<String> {
+pub fn upsert_app_host(store_path: &Path, mut host: Host) -> SshResult<String> {
     let mut hosts = load_app_hosts(store_path)?;
-    host.source = "app".into();
+    host.source = HostSource::App;
     if host.id.is_empty() {
         host.id = format!("app:{}", uuid::Uuid::new_v4());
     }
@@ -252,7 +264,7 @@ pub fn upsert_app_host(store_path: &PathBuf, mut host: Host) -> SshResult<String
     Ok(id)
 }
 
-pub fn delete_app_host(store_path: &PathBuf, id: &str) -> SshResult<()> {
+pub fn delete_app_host(store_path: &Path, id: &str) -> SshResult<()> {
     let mut hosts = load_app_hosts(store_path)?;
     hosts.retain(|h| h.id != id);
     save_app_hosts(store_path, &hosts)
@@ -270,26 +282,57 @@ pub fn resolve_jump(token: &str, all: &[Host]) -> Host {
         None => (String::new(), token),
     };
     let (hostname, port) = match rest.rsplit_once(':') {
-        Some((h, p)) => (h.to_string(), p.parse().unwrap_or(22)),
-        None => (rest.to_string(), 22),
+        Some((h, p)) => (h.to_string(), p.parse().unwrap_or(DEFAULT_SSH_PORT)),
+        None => (rest.to_string(), DEFAULT_SSH_PORT),
     };
     Host {
         id: format!("jump:{token}"),
-        source: "ssh-config".into(),
+        source: HostSource::SshConfig,
         alias: hostname.clone(),
         hostname,
         user,
         port,
-        identity_file: None,
-        use_agent: true,
-        proxy_jump: None,
-        forwards: Vec::new(),
-        extra_options: None,
+        ..Host::default()
     }
 }
 
-impl SshError {
-    pub fn msg(s: impl Into<String>) -> Self {
-        SshError::Msg(s.into())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_local_forward_with_bind_addr() {
+        let spec = parse_local_forward("0.0.0.0:8080 db:5432").unwrap();
+        assert_eq!(spec.bind_addr, "0.0.0.0");
+        assert_eq!(spec.bind_port, 8080);
+        assert_eq!(spec.dest_host, "db");
+        assert_eq!(spec.dest_port, 5432);
+    }
+
+    #[test]
+    fn parse_local_forward_defaults_bind_addr() {
+        let spec = parse_local_forward("8080 db:5432").unwrap();
+        assert_eq!(spec.bind_addr, DEFAULT_BIND_ADDR);
+        assert_eq!(spec.bind_port, 8080);
+    }
+
+    #[test]
+    fn parse_local_forward_rejects_garbage() {
+        assert!(parse_local_forward("nope").is_none());
+    }
+
+    #[test]
+    fn block_to_host_parses_directives() {
+        let body = vec![
+            "Host web".to_string(),
+            "    HostName example.com".to_string(),
+            "    User deploy".to_string(),
+            "    Port 2222".to_string(),
+        ];
+        let host = block_to_host("web", &body);
+        assert_eq!(host.hostname, "example.com");
+        assert_eq!(host.user, "deploy");
+        assert_eq!(host.port, 2222);
+        assert_eq!(host.source, HostSource::SshConfig);
     }
 }

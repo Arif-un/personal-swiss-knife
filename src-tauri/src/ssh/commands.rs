@@ -3,18 +3,66 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
 use crate::ssh::session::{SessionCmd, SshState};
-use crate::ssh::{config, keychain, session, ForwardSpec, Host};
+use crate::ssh::{config, keychain, session, ForwardSpec, Host, HostSource, DEFAULT_SSH_PORT};
+
+const HOSTS_FILE: &str = "hosts.json";
 
 fn app_store_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(dir.join("hosts.json"))
+    Ok(dir.join(HOSTS_FILE))
 }
 
 fn all_hosts(app: &AppHandle) -> Result<Vec<Host>, String> {
     let mut hosts = config::parse_ssh_config();
     let store = app_store_path(app)?;
-    hosts.extend(config::load_app_hosts(&store).map_err(|e| e.to_string())?);
+    hosts.extend(config::load_app_hosts(&store)?);
     Ok(hosts)
+}
+
+/// Reject control characters / newlines in single-line host fields so a saved
+/// host can never inject extra directives into `~/.ssh/config` (e.g. a newline
+/// followed by `ProxyCommand`). `extra_options` is intentionally multi-line and
+/// is validated only for an empty alias / carriage returns.
+fn validate_host(host: &Host) -> Result<(), String> {
+    fn ok_single_line(value: &str) -> bool {
+        !value.chars().any(|c| c.is_control())
+    }
+
+    if host.alias.trim().is_empty() {
+        return Err("host alias is required".into());
+    }
+    if host.alias.split_whitespace().count() != 1 {
+        return Err("host alias must not contain whitespace".into());
+    }
+
+    let single_line: [(&str, &str); 4] = [
+        ("alias", &host.alias),
+        ("hostname", &host.hostname),
+        ("user", &host.user),
+        ("identity file", host.identity_file.as_deref().unwrap_or("")),
+    ];
+    for (label, value) in single_line {
+        if !ok_single_line(value) {
+            return Err(format!("{label} must not contain control characters"));
+        }
+    }
+    if let Some(pj) = &host.proxy_jump {
+        if !ok_single_line(pj) {
+            return Err("proxy jump must not contain control characters".into());
+        }
+    }
+    for f in &host.forwards {
+        if !ok_single_line(&f.bind_addr) || !ok_single_line(&f.dest_host) {
+            return Err("port-forward address must not contain control characters".into());
+        }
+    }
+    // `extra_options` may span lines, but a lone CR would corrupt the block.
+    if let Some(extra) = &host.extra_options {
+        if extra.contains('\r') {
+            return Err("extra options must not contain carriage returns".into());
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -24,22 +72,23 @@ pub fn hosts_list(app: AppHandle) -> Result<Vec<Host>, String> {
 
 #[tauri::command]
 pub fn host_save(app: AppHandle, host: Host) -> Result<String, String> {
-    if host.source == "ssh-config" {
-        config::write_host_block(&host).map_err(|e| e.to_string())?;
+    validate_host(&host)?;
+    if host.source == HostSource::SshConfig {
+        config::write_host_block(&host)?;
         Ok(host.id)
     } else {
         let store = app_store_path(&app)?;
-        config::upsert_app_host(&store, host).map_err(|e| e.to_string())
+        Ok(config::upsert_app_host(&store, host)?)
     }
 }
 
 #[tauri::command]
 pub fn host_delete(app: AppHandle, host: Host) -> Result<(), String> {
-    if host.source == "ssh-config" {
-        config::delete_host_block(&host.alias).map_err(|e| e.to_string())
+    if host.source == HostSource::SshConfig {
+        Ok(config::delete_host_block(&host.alias)?)
     } else {
         let store = app_store_path(&app)?;
-        config::delete_app_host(&store, &host.id).map_err(|e| e.to_string())
+        Ok(config::delete_app_host(&store, &host.id)?)
     }
 }
 
@@ -66,7 +115,7 @@ pub fn ssh_build_command(app: AppHandle, host_id: String) -> Result<String, Stri
 
 #[tauri::command]
 pub fn ssh_set_passphrase(key_path: String, secret: String) -> Result<(), String> {
-    keychain::set_passphrase(&key_path, &secret).map_err(|e| e.to_string())
+    Ok(keychain::set_passphrase(&key_path, &secret)?)
 }
 
 #[tauri::command]
@@ -83,9 +132,7 @@ pub async fn ssh_connect(
         .find(|h| h.id == host_id)
         .cloned()
         .ok_or("host not found")?;
-    session::connect(state.inner(), app.clone(), host, all, cols, rows)
-        .await
-        .map_err(|e| e.to_string())
+    Ok(session::connect(state.inner(), app.clone(), host, all, cols, rows).await?)
 }
 
 #[tauri::command]
@@ -149,12 +196,18 @@ pub async fn forward_start(
             .map(|e| e.handle.clone())
             .ok_or("session not found")?
     };
-    let fh = crate::ssh::forward::start(handle, spec)
-        .await
-        .map_err(|e| e.to_string())?;
+    let fh = crate::ssh::forward::start(handle, spec).await?;
     let fwd_id = format!("fwd:{}", uuid::Uuid::new_v4());
-    if let Some(entry) = state.sessions.lock().await.get_mut(&session_id) {
-        entry.forwards.insert(fwd_id.clone(), fh);
+    // If the session vanished while binding, abort the listener instead of
+    // leaking it — the forward would otherwise stay bound but untracked.
+    match state.sessions.lock().await.get_mut(&session_id) {
+        Some(entry) => {
+            entry.forwards.insert(fwd_id.clone(), fh);
+        }
+        None => {
+            fh.task.abort();
+            return Err("session closed before forward was registered".into());
+        }
     }
     Ok(fwd_id)
 }
@@ -211,7 +264,7 @@ fn build_command(host: &Host) -> String {
             parts.push(format!("-i {id}"));
         }
     }
-    if host.port != 22 {
+    if host.port != DEFAULT_SSH_PORT {
         parts.push(format!("-p {}", host.port));
     }
     for f in &host.forwards {
@@ -227,4 +280,46 @@ fn build_command(host: &Host) -> String {
     };
     parts.push(target);
     parts.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_host() -> Host {
+        Host {
+            alias: "web".into(),
+            hostname: "example.com".into(),
+            user: "deploy".into(),
+            ..Host::default()
+        }
+    }
+
+    #[test]
+    fn validate_accepts_clean_host() {
+        assert!(validate_host(&sample_host()).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_newline_injection() {
+        let mut host = sample_host();
+        host.hostname = "example.com\n    ProxyCommand touch /tmp/pwned".into();
+        assert!(validate_host(&host).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_alias() {
+        let mut host = sample_host();
+        host.alias = "two words".into();
+        assert!(validate_host(&host).is_err());
+    }
+
+    #[test]
+    fn build_command_includes_non_default_port_and_user() {
+        let mut host = sample_host();
+        host.port = 2222;
+        let cmd = build_command(&host);
+        assert!(cmd.contains("-p 2222"));
+        assert!(cmd.contains("deploy@example.com"));
+    }
 }

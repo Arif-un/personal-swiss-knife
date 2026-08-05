@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -33,7 +33,7 @@ fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("pr-views.json"))
 }
 
-fn load(path: &PathBuf) -> Result<PrViewsStore, String> {
+fn load(path: &Path) -> Result<PrViewsStore, String> {
     if !path.exists() {
         return Ok(PrViewsStore::default());
     }
@@ -44,7 +44,7 @@ fn load(path: &PathBuf) -> Result<PrViewsStore, String> {
     serde_json::from_str(&data).map_err(|e| e.to_string())
 }
 
-fn save(path: &PathBuf, store: &PrViewsStore) -> Result<(), String> {
+fn save(path: &Path, store: &PrViewsStore) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

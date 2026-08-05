@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::ssh::Host;
+use crate::ssh::{Host, DEFAULT_SSH_PORT};
 
 fn history_files() -> Vec<PathBuf> {
     let mut v = Vec::new();
@@ -35,7 +35,7 @@ fn parse_ssh(cmd: &str) -> Option<Host> {
 
     let mut i = pos + 1;
     let mut user = String::new();
-    let mut port: u16 = 22;
+    let mut port: u16 = DEFAULT_SSH_PORT;
     let mut identity: Option<String> = None;
     let mut proxy: Option<String> = None;
     let mut target: Option<String> = None;
@@ -50,7 +50,7 @@ fn parse_ssh(cmd: &str) -> Option<Host> {
             "-p" => {
                 i += 1;
                 if let Some(p) = tokens.get(i) {
-                    port = p.parse().unwrap_or(22);
+                    port = p.parse().unwrap_or(DEFAULT_SSH_PORT);
                 }
             }
             "-l" => {
@@ -95,17 +95,13 @@ fn parse_ssh(cmd: &str) -> Option<Host> {
 
     let alias = host.split('.').next().unwrap_or(&host).to_string();
     Some(Host {
-        id: String::new(),
-        source: "app".into(),
         alias,
         hostname: host,
         user,
         port,
         identity_file: identity,
-        use_agent: true,
         proxy_jump: proxy,
-        forwards: Vec::new(),
-        extra_options: None,
+        ..Host::default()
     })
 }
 
@@ -133,4 +129,37 @@ pub fn discover_hosts() -> Vec<Host> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ssh_user_at_host() {
+        let host = parse_ssh("ssh deploy@example.com").unwrap();
+        assert_eq!(host.user, "deploy");
+        assert_eq!(host.hostname, "example.com");
+        assert_eq!(host.alias, "example");
+    }
+
+    #[test]
+    fn parse_ssh_with_port_and_identity() {
+        let host = parse_ssh("ssh -p 2222 -i ~/.ssh/id_ed25519 deploy@10.0.0.1").unwrap();
+        assert_eq!(host.port, 2222);
+        assert_eq!(host.identity_file.as_deref(), Some("~/.ssh/id_ed25519"));
+        assert_eq!(host.hostname, "10.0.0.1");
+    }
+
+    #[test]
+    fn parse_ssh_rejects_bare_alias() {
+        // No `@` and no dot: likely a config alias, not a connectable target.
+        assert!(parse_ssh("ssh myalias").is_none());
+    }
+
+    #[test]
+    fn strip_prefix_zsh_and_fish() {
+        assert_eq!(strip_prefix(": 1700000000:0;ssh host"), "ssh host");
+        assert_eq!(strip_prefix("- cmd: ssh host"), "ssh host");
+    }
 }

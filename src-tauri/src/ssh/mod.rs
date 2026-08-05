@@ -8,6 +8,27 @@ pub mod keychain;
 pub mod known_hosts;
 pub mod session;
 
+/// Default SSH port when a host does not specify one.
+pub const DEFAULT_SSH_PORT: u16 = 22;
+/// Default local bind address for port forwards.
+pub const DEFAULT_BIND_ADDR: &str = "127.0.0.1";
+
+/// Tauri event names emitted by the SSH layer.
+pub const EVENT_SSH_DATA: &str = "ssh://data";
+pub const EVENT_SSH_CLOSED: &str = "ssh://closed";
+pub const EVENT_SSH_HOSTKEY: &str = "ssh://hostkey";
+
+/// Where a host definition came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostSource {
+    /// Owned by the app's `hosts.json` store.
+    #[default]
+    App,
+    /// Parsed from (and written back to) `~/.ssh/config`.
+    SshConfig,
+}
+
 /// A `-L` local port-forward specification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,9 +49,8 @@ pub struct ForwardSpec {
 pub struct Host {
     #[serde(default)]
     pub id: String,
-    /// "ssh-config" or "app".
-    #[serde(default = "default_source")]
-    pub source: String,
+    #[serde(default)]
+    pub source: HostSource,
     pub alias: String,
     #[serde(default)]
     pub hostname: String,
@@ -50,17 +70,32 @@ pub struct Host {
     pub extra_options: Option<String>,
 }
 
+impl Default for Host {
+    fn default() -> Self {
+        Host {
+            id: String::new(),
+            source: HostSource::default(),
+            alias: String::new(),
+            hostname: String::new(),
+            user: String::new(),
+            port: DEFAULT_SSH_PORT,
+            identity_file: None,
+            use_agent: true,
+            proxy_jump: None,
+            forwards: Vec::new(),
+            extra_options: None,
+        }
+    }
+}
+
 fn default_forward_kind() -> String {
     "L".into()
 }
 fn default_bind_addr() -> String {
-    "127.0.0.1".into()
-}
-fn default_source() -> String {
-    "app".into()
+    DEFAULT_BIND_ADDR.into()
 }
 fn default_port() -> u16 {
-    22
+    DEFAULT_SSH_PORT
 }
 fn default_true() -> bool {
     true
@@ -89,14 +124,15 @@ impl From<SshError> for String {
         e.to_string()
     }
 }
-impl From<String> for SshError {
-    fn from(s: String) -> Self {
-        SshError::Msg(s)
-    }
-}
 impl From<&str> for SshError {
     fn from(s: &str) -> Self {
         SshError::Msg(s.to_string())
+    }
+}
+
+impl SshError {
+    pub fn msg(s: impl Into<String>) -> Self {
+        SshError::Msg(s.into())
     }
 }
 
