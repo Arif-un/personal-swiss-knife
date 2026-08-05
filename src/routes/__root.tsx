@@ -3,9 +3,8 @@ import {
   createRootRoute,
   useRouterState,
 } from "@tanstack/react-router";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronRightIcon } from "lucide-react";
-import { AppSidebar, navItems } from "#components/AppSidebar.tsx";
+import { AppSidebar } from "#components/AppSidebar.tsx";
 import {
   SidebarInset,
   SidebarProvider,
@@ -15,9 +14,12 @@ import {
 import { TooltipProvider } from "#components/ui/tooltip.tsx";
 import { ThemeProvider } from "#hooks/use-theme.tsx";
 import { cn } from "#lib/utils.ts";
+import { navItems } from "#lib/nav.ts";
+import { useWindowDrag } from "#hooks/use-window-drag.ts";
 
 function Header() {
   const { state } = useSidebar();
+  const onDrag = useWindowDrag();
   const pathname = useRouterState({
     select: (s) => s.location.pathname,
   });
@@ -25,10 +27,7 @@ function Header() {
 
   return (
     <header
-      onMouseDown={(e) => {
-        if ((e.target as HTMLElement).closest("button, a, input")) return;
-        getCurrentWindow().startDragging();
-      }}
+      onMouseDown={onDrag}
       className={cn(
         "flex h-12 shrink-0 items-center gap-2 border-b px-4 transition-[padding] duration-200",
         state === "collapsed" && "pl-21",

@@ -1,21 +1,24 @@
-import { SunIcon, MoonIcon, MonitorIcon } from "lucide-react"
-import { useTheme } from "#hooks/use-theme.tsx"
+import { SunIcon, MoonIcon, MonitorIcon } from "lucide-react";
+import { Button } from "#components/ui/button.tsx";
+import { useTheme } from "#hooks/use-theme.tsx";
 
-const cycle = ["light", "dark", "system"] as const
+const cycle = ["light", "dark", "system"] as const;
 
 export function ThemeSwitch() {
-  const { theme, setTheme } = useTheme()
-  const next = cycle[(cycle.indexOf(theme) + 1) % cycle.length]
-  const Icon = theme === "light" ? SunIcon : theme === "dark" ? MoonIcon : MonitorIcon
+  const { theme, setTheme } = useTheme();
+  const next = cycle[(cycle.indexOf(theme) + 1) % cycle.length];
+  const Icon = theme === "light" ? SunIcon : theme === "dark" ? MoonIcon : MonitorIcon;
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       onClick={() => setTheme(next)}
-      className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       title={`Theme: ${theme}`}
+      className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
       <Icon className="size-4" />
-    </button>
-  )
+    </Button>
+  );
 }

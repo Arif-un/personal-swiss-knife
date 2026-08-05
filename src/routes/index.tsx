@@ -1,23 +1,10 @@
 import { createRoute, Link } from "@tanstack/react-router";
-import { GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { rootRoute } from "./__root.tsx";
-
-const tools = [
-  {
-    path: "/pull-requests",
-    icon: GitPullRequestIcon,
-    title: "Pull Requests",
-    description: "Browse, filter, and manage GitHub PRs across a repo.",
-  },
-  {
-    path: "/ssh",
-    icon: TerminalIcon,
-    title: "SSH",
-    description: "Connect to hosts, open terminals, and forward ports.",
-  },
-];
+import { navItems } from "#lib/nav.ts";
 
 function HomePage() {
+  const tools = navItems.filter((item) => item.description);
+
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-3xl font-bold">Welcome to Swiss Knife</h1>

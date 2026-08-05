@@ -1,0 +1,32 @@
+import {
+  GitPullRequestIcon,
+  HomeIcon,
+  TerminalIcon,
+  type LucideIcon,
+} from "lucide-react";
+
+export interface NavItem {
+  title: string;
+  path: string;
+  icon: LucideIcon;
+  /** Shown on the home page tool grid (omit to hide from it). */
+  description?: string;
+}
+
+/** Single source of truth for routes shown in the sidebar, header title, and
+ *  home page. */
+export const navItems: NavItem[] = [
+  { title: "Home", path: "/", icon: HomeIcon },
+  {
+    title: "Pull Requests",
+    path: "/pull-requests",
+    icon: GitPullRequestIcon,
+    description: "Browse, filter, and manage GitHub PRs across a repo.",
+  },
+  {
+    title: "SSH",
+    path: "/ssh",
+    icon: TerminalIcon,
+    description: "Connect to hosts, open terminals, and forward ports.",
+  },
+];

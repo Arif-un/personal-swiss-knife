@@ -16,7 +16,18 @@ declare module "@tanstack/react-router" {
   }
 }
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Desktop app hitting local CLIs: don't refetch on focus, keep results
+      // briefly fresh, and retry once. Views that need always-fresh data (e.g.
+      // PR checks) opt out explicitly.
+      staleTime: 30_000,
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 function App() {
   return (

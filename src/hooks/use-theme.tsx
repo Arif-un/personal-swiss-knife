@@ -11,6 +11,10 @@ const ThemeContext = React.createContext<ThemeContextProps | null>(null)
 
 const STORAGE_KEY = "theme"
 
+function isTheme(value: unknown): value is Theme {
+  return value === "light" || value === "dark" || value === "system"
+}
+
 function getSystemTheme(): "light" | "dark" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
@@ -24,13 +28,14 @@ function applyTheme(theme: Theme) {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
-    return (localStorage.getItem(STORAGE_KEY) as Theme) || "system"
+    const stored = localStorage.getItem(STORAGE_KEY)
+    return isTheme(stored) ? stored : "system"
   })
 
   const setTheme = React.useCallback((t: Theme) => {
     localStorage.setItem(STORAGE_KEY, t)
     setThemeState(t)
-    applyTheme(t)
+    // The [theme] effect below applies it; no need to apply here too.
   }, [])
 
   React.useEffect(() => {
@@ -45,10 +50,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", handler)
   }, [theme])
 
+  const value = React.useMemo(() => ({ theme, setTheme }), [theme, setTheme])
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
   )
 }
 
