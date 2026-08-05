@@ -77,13 +77,25 @@ export function HostForm({ initial, onSave, onClose }: Props) {
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Alias">
-              <Input value={h.alias} onChange={(e) => set("alias", e.target.value)} placeholder="prod-web" />
+              <Input
+                value={h.alias}
+                onChange={(e) => set("alias", e.target.value)}
+                placeholder="prod-web"
+              />
             </Field>
             <Field label="Hostname / IP">
-              <Input value={h.hostname} onChange={(e) => set("hostname", e.target.value)} placeholder="10.0.4.12" />
+              <Input
+                value={h.hostname}
+                onChange={(e) => set("hostname", e.target.value)}
+                placeholder="10.0.4.12"
+              />
             </Field>
             <Field label="User">
-              <Input value={h.user} onChange={(e) => set("user", e.target.value)} placeholder="root" />
+              <Input
+                value={h.user}
+                onChange={(e) => set("user", e.target.value)}
+                placeholder="root"
+              />
             </Field>
             <Field label="Port">
               <Input
@@ -155,7 +167,12 @@ export function HostForm({ initial, onSave, onClose }: Props) {
                   onChange={(e) => setForward(i, { destPort: Number(e.target.value) || 0 })}
                   placeholder="5432"
                 />
-                <Button variant="ghost" size="icon-sm" onClick={() => removeForward(i)} aria-label="Remove">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => removeForward(i)}
+                  aria-label="Remove"
+                >
                   <Trash2Icon />
                 </Button>
               </div>
@@ -173,11 +190,10 @@ export function HostForm({ initial, onSave, onClose }: Props) {
         </div>
 
         <div className="flex justify-end gap-2 border-t px-4 py-3">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => onSave(h)}
-            disabled={!h.alias.trim() || !h.hostname.trim()}
-          >
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={() => onSave(h)} disabled={!h.alias.trim() || !h.hostname.trim()}>
             Save
           </Button>
         </div>

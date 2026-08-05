@@ -80,20 +80,14 @@ function PrRowImpl({
             }
           >
             <MessageSquare className="size-3" />
-            {unresolvedCount > 0 && (
-              <span className="tabular-nums">{unresolvedCount}</span>
-            )}
+            {unresolvedCount > 0 && <span className="tabular-nums">{unresolvedCount}</span>}
           </div>
         </TableCell>
         <TableCell className="text-muted-foreground">{pr.author}</TableCell>
         <TableCell>
-          <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
-            {pr.headRefName}
-          </code>
+          <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{pr.headRefName}</code>
         </TableCell>
-        <TableCell className="text-muted-foreground">
-          {formatDate(pr.createdAt)}
-        </TableCell>
+        <TableCell className="text-muted-foreground">{formatDate(pr.createdAt)}</TableCell>
         <TableCell className="text-center">
           <div className="relative inline-flex">
             <Button
@@ -107,15 +101,9 @@ function PrRowImpl({
                   ? `Re-add ${CI_LABEL} label (added ${ciCount}× so far)`
                   : `Add ${CI_LABEL} label${ciCount ? ` (added ${ciCount}× so far)` : ""}`
               }
-              className={
-                hasCi ? "text-blue-500" : "opacity-40 hover:opacity-100"
-              }
+              className={hasCi ? "text-blue-500" : "opacity-40 hover:opacity-100"}
             >
-              {isCiPending ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <FlaskConical />
-              )}
+              {isCiPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}
             </Button>
             {ciCount > 0 && (
               <Badge

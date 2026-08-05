@@ -1,8 +1,4 @@
-import {
-  Outlet,
-  createRootRoute,
-  useRouterState,
-} from "@tanstack/react-router";
+import { Outlet, createRootRoute, useRouterState } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { AppSidebar } from "#components/AppSidebar.tsx";
 import {

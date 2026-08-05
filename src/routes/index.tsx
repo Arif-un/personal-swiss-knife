@@ -17,9 +17,7 @@ function HomePage() {
           >
             <tool.icon className="size-5 text-muted-foreground" />
             <span className="font-medium">{tool.title}</span>
-            <span className="text-sm text-muted-foreground">
-              {tool.description}
-            </span>
+            <span className="text-sm text-muted-foreground">{tool.description}</span>
           </Link>
         ))}
       </div>

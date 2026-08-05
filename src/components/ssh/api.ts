@@ -22,8 +22,7 @@ export const sshApi = {
     invoke<string>("ssh_connect", { hostId, cols, rows }),
   trustHostkey: (promptId: string, trust: boolean) =>
     invoke<void>("ssh_trust_hostkey", { promptId, trust }),
-  write: (sessionId: string, data: string) =>
-    invoke<void>("ssh_write", { sessionId, data }),
+  write: (sessionId: string, data: string) => invoke<void>("ssh_write", { sessionId, data }),
   resize: (sessionId: string, cols: number, rows: number) =>
     invoke<void>("ssh_resize", { sessionId, cols, rows }),
   disconnect: (sessionId: string) => invoke<void>("ssh_disconnect", { sessionId }),
@@ -32,8 +31,7 @@ export const sshApi = {
     invoke<string>("forward_start", { sessionId, spec }),
   forwardStop: (sessionId: string, forwardId: string) =>
     invoke<void>("forward_stop", { sessionId, forwardId }),
-  forwardsList: (sessionId: string) =>
-    invoke<ForwardInfo[]>("forwards_list", { sessionId }),
+  forwardsList: (sessionId: string) => invoke<ForwardInfo[]>("forwards_list", { sessionId }),
 };
 
 /** Tauri event channel names emitted by the SSH backend. */
@@ -46,8 +44,7 @@ export const SSH_EVENTS = {
 /** Typed `listen` wrappers so channel names live in one place (parity with the
  *  invoke wrappers above). Each returns the unlisten promise. */
 export const sshEvents = {
-  onData: (cb: (e: Event<SshDataEvent>) => void) =>
-    listen<SshDataEvent>(SSH_EVENTS.data, cb),
+  onData: (cb: (e: Event<SshDataEvent>) => void) => listen<SshDataEvent>(SSH_EVENTS.data, cb),
   onClosed: (cb: (e: Event<SshClosedEvent>) => void) =>
     listen<SshClosedEvent>(SSH_EVENTS.closed, cb),
   onHostkey: (cb: (e: Event<HostKeyPrompt>) => void) =>

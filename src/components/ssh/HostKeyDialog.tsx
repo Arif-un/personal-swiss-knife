@@ -25,7 +25,9 @@ export function HostKeyDialog({ prompt, onDecide }: Props) {
           {prompt.fingerprint}
         </div>
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => onDecide(false)}>Reject</Button>
+          <Button variant="outline" onClick={() => onDecide(false)}>
+            Reject
+          </Button>
           <Button onClick={() => onDecide(true)}>Trust &amp; connect</Button>
         </div>
       </div>

@@ -1,21 +1,8 @@
 import { useState } from "react";
-import {
-  Check,
-  Loader2,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Settings,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Check, Loader2, Pencil, Plus, RefreshCw, Settings, Trash2, X } from "lucide-react";
 import { Button } from "#components/ui/button.tsx";
 import { Input } from "#components/ui/input.tsx";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "#components/ui/popover.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "#components/ui/popover.tsx";
 import { cn } from "#lib/utils.ts";
 import type { PrView } from "./types.ts";
 
@@ -69,29 +56,20 @@ export function ViewsMenu({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Pull request views"
-          />
-        }
+        render={<Button variant="ghost" size="icon-sm" aria-label="Pull request views" />}
       >
         {busy ? <Loader2 className="animate-spin" /> : <Settings />}
       </PopoverTrigger>
       <PopoverContent className="w-80 p-0">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <span className="text-sm font-medium">Views</span>
-          {busy && (
-            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-          )}
+          {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         </div>
 
         <div className="max-h-72 overflow-y-auto py-1">
           {views.length === 0 && (
             <p className="px-3 py-3 text-center text-xs text-muted-foreground">
-              No saved views yet. Fetch a repo, then save the current repo and
-              filters below.
+              No saved views yet. Fetch a repo, then save the current repo and filters below.
             </p>
           )}
           {views.map((view) =>
@@ -125,10 +103,7 @@ export function ViewsMenu({
                 </Button>
               </div>
             ) : (
-              <div
-                key={view.id}
-                className="group/view flex items-center gap-1 px-2"
-              >
+              <div key={view.id} className="group/view flex items-center gap-1 px-2">
                 <button
                   type="button"
                   onClick={() => onApply(view)}
@@ -140,9 +115,7 @@ export function ViewsMenu({
                   <Check
                     className={cn(
                       "size-3.5 shrink-0",
-                      view.id === activeViewId
-                        ? "opacity-100"
-                        : "opacity-0",
+                      view.id === activeViewId ? "opacity-100" : "opacity-0",
                     )}
                   />
                   <span className="min-w-0 flex-1 truncate">{view.name}</span>
@@ -192,17 +165,11 @@ export function ViewsMenu({
             onKeyDown={(e) => {
               if (e.key === "Enter") saveCurrent();
             }}
-            placeholder={
-              canSaveCurrent ? "New view name" : "Fetch a repo first"
-            }
+            placeholder={canSaveCurrent ? "New view name" : "Fetch a repo first"}
             disabled={!canSaveCurrent}
             className="h-7"
           />
-          <Button
-            size="sm"
-            disabled={!canSaveCurrent || !newName.trim()}
-            onClick={saveCurrent}
-          >
+          <Button size="sm" disabled={!canSaveCurrent || !newName.trim()} onClick={saveCurrent}>
             <Plus />
             Save
           </Button>

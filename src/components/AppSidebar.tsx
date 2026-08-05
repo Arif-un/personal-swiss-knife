@@ -22,10 +22,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader
-        className="h-12 flex-row items-center py-0 pl-21"
-        onMouseDown={onDrag}
-      >
+      <SidebarHeader className="h-12 flex-row items-center py-0 pl-21" onMouseDown={onDrag}>
         <SidebarTrigger className="size-[18px] min-w-[18px] -mt-0.5 rounded-full p-0 cursor-pointer hover:bg-sidebar-accent" />
       </SidebarHeader>
       <SidebarContent>

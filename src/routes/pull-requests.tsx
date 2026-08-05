@@ -11,17 +11,9 @@ import { ViewsMenu } from "#components/pull-requests/ViewsMenu.tsx";
 import { ErrorBox } from "#components/pull-requests/ErrorBox.tsx";
 import { PrFiltersPanel } from "#components/pull-requests/PrFiltersPanel.tsx";
 import { PrTable } from "#components/pull-requests/PrTable.tsx";
-import {
-  usePrAuxCounts,
-  usePrViews,
-  usePullRequests,
-} from "#components/pull-requests/hooks.ts";
+import { usePrAuxCounts, usePrViews, usePullRequests } from "#components/pull-requests/hooks.ts";
 import { countActive } from "#components/pull-requests/utils.ts";
-import {
-  makeEmptyFilters,
-  type Filters,
-  type PrView,
-} from "#components/pull-requests/types.ts";
+import { makeEmptyFilters, type Filters, type PrView } from "#components/pull-requests/types.ts";
 
 function PullRequestsPage() {
   const [repo, setRepo] = useState("");
@@ -53,10 +45,7 @@ function PullRequestsPage() {
   } = usePullRequests(searchRepo, appliedFilters);
 
   const prNumbers = useMemo(() => prs?.map((p) => p.number) ?? [], [prs]);
-  const { ciCounts, unresolvedCounts, mergeQueueStatus } = usePrAuxCounts(
-    searchRepo,
-    prNumbers,
-  );
+  const { ciCounts, unresolvedCounts, mergeQueueStatus } = usePrAuxCounts(searchRepo, prNumbers);
 
   const {
     data: viewsData,
@@ -136,22 +125,14 @@ function PullRequestsPage() {
     setSearchRepo(repo);
   }
 
-  const setField = useCallback(
-    <K extends keyof Filters>(key: K, value: Filters[K]) => {
-      setFilters((prev) => ({ ...prev, [key]: value }));
-    },
-    [],
-  );
+  const setField = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
-  const onCiMutate = useCallback(
-    (number: number) => ciMutation.mutate(number),
-    [ciMutation],
-  );
+  const onCiMutate = useCallback((number: number) => ciMutation.mutate(number), [ciMutation]);
 
   const activeCount = countActive(appliedFilters);
-  const ciPendingNumber = ciMutation.isPending
-    ? ciMutation.variables ?? null
-    : null;
+  const ciPendingNumber = ciMutation.isPending ? (ciMutation.variables ?? null) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -229,10 +210,7 @@ function PullRequestsPage() {
       {error && <ErrorBox error={error} fallback="Failed to fetch PRs" />}
 
       {ciMutation.isError && (
-        <ErrorBox
-          error={ciMutation.error}
-          fallback="Failed to update CI label"
-        />
+        <ErrorBox error={ciMutation.error} fallback="Failed to update CI label" />
       )}
 
       {prs && (

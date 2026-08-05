@@ -1,12 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  Ban,
-  CheckCircle2,
-  Clock,
-  Loader2,
-  MinusCircle,
-  XCircle,
-} from "lucide-react";
+import { Ban, CheckCircle2, Clock, Loader2, MinusCircle, XCircle } from "lucide-react";
 import { prApi, prKeys } from "./api.ts";
 import type { PrCheck } from "./types.ts";
 import { groupChecksByWorkflow } from "./utils.ts";
@@ -58,11 +51,7 @@ export function PrCheckList({ repo, number }: { repo: string; number: number }) 
   }
 
   if (!data || data.length === 0) {
-    return (
-      <div className="p-3 text-[8px] text-muted-foreground">
-        No checks reported.
-      </div>
-    );
+    return <div className="p-3 text-[8px] text-muted-foreground">No checks reported.</div>;
   }
 
   const groups = groupChecksByWorkflow(data);
@@ -76,10 +65,7 @@ export function PrCheckList({ repo, number }: { repo: string; number: number }) 
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             {group.checks.map((c, i) => (
-              <div
-                key={`${c.name}-${i}`}
-                className="flex items-center gap-1.5 text-[8px]"
-              >
+              <div key={`${c.name}-${i}`} className="flex items-center gap-1.5 text-[8px]">
                 {checkIcon(c.bucket)}
                 {c.link ? (
                   <a

@@ -19,16 +19,11 @@ export function countActive(f: Filters): number {
 }
 
 /** Colored dot + label reflecting a PR's overall status. */
-export function statusDot(
-  pr: PullRequest,
-  queued: boolean,
-): { color: string; label: string } {
-  if (pr.state.toUpperCase() === "MERGED")
-    return { color: "bg-purple-500", label: "Merged" };
+export function statusDot(pr: PullRequest, queued: boolean): { color: string; label: string } {
+  if (pr.state.toUpperCase() === "MERGED") return { color: "bg-purple-500", label: "Merged" };
   if (pr.isDraft) return { color: "bg-muted-foreground/40", label: "Draft" };
   if (queued) return { color: "bg-orange-500", label: "In merge queue" };
-  if (pr.state.toUpperCase() === "CLOSED")
-    return { color: "bg-red-500", label: "Closed" };
+  if (pr.state.toUpperCase() === "CLOSED") return { color: "bg-red-500", label: "Closed" };
   return { color: "bg-blue-500", label: "Open" };
 }
 

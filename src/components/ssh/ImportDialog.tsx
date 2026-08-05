@@ -18,9 +18,7 @@ function hostKey(h: Host): string {
 }
 
 export function ImportDialog({ found, onImport, onClose }: Props) {
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(found.map(hostKey)),
-  );
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(found.map(hostKey)));
 
   function toggle(key: string) {
     setSelected((prev) => {
@@ -87,7 +85,9 @@ export function ImportDialog({ found, onImport, onClose }: Props) {
             {found.length > 0 ? `${selected.size} of ${found.length} selected` : ""}
           </span>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
             <Button
               disabled={selected.size === 0}
               onClick={() => onImport(found.filter((h) => selected.has(hostKey(h))))}

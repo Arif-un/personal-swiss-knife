@@ -36,8 +36,7 @@ function SshPage() {
     queryKey: sshKeys.hosts(),
     queryFn: () => sshApi.hostsList(),
   });
-  const invalidateHosts = () =>
-    qc.invalidateQueries({ queryKey: sshKeys.hosts() });
+  const invalidateHosts = () => qc.invalidateQueries({ queryKey: sshKeys.hosts() });
 
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -63,11 +62,13 @@ function SshPage() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    sshEvents.onHostkey((e) => setPrompt(e.payload)).then((u) => {
-      // If we unmounted before the listener registered, drop it now.
-      if (cancelled) u();
-      else unlisten = u;
-    });
+    sshEvents
+      .onHostkey((e) => setPrompt(e.payload))
+      .then((u) => {
+        // If we unmounted before the listener registered, drop it now.
+        if (cancelled) u();
+        else unlisten = u;
+      });
     return () => {
       cancelled = true;
       unlisten?.();
@@ -86,9 +87,7 @@ function SshPage() {
   });
   const importMutation = useMutation({
     mutationFn: async (toImport: Host[]) => {
-      const results = await Promise.allSettled(
-        toImport.map((h) => sshApi.hostSave(h)),
-      );
+      const results = await Promise.allSettled(toImport.map((h) => sshApi.hostSave(h)));
       const failed = results.filter((r) => r.status === "rejected").length;
       return { total: toImport.length, failed };
     },
@@ -131,10 +130,7 @@ function SshPage() {
     },
     [saveMutation],
   );
-  const deleteHost = useCallback(
-    (host: Host) => deleteMutation.mutate(host),
-    [deleteMutation],
-  );
+  const deleteHost = useCallback((host: Host) => deleteMutation.mutate(host), [deleteMutation]);
 
   const openImport = useCallback(async () => {
     try {
@@ -207,7 +203,11 @@ function SshPage() {
                   <span
                     className={cn(
                       "size-1.5 rounded-full",
-                      tab.closed ? "bg-muted-foreground" : tab.sessionId ? "bg-green-500" : "bg-amber-500",
+                      tab.closed
+                        ? "bg-muted-foreground"
+                        : tab.sessionId
+                          ? "bg-green-500"
+                          : "bg-amber-500",
                     )}
                   />
                   {tab.host.alias}
@@ -220,10 +220,7 @@ function SshPage() {
           </div>
 
           {/* terminals */}
-          <div
-            className="relative min-h-0 flex-1"
-            style={{ backgroundColor: TERM_BACKGROUND }}
-          >
+          <div className="relative min-h-0 flex-1" style={{ backgroundColor: TERM_BACKGROUND }}>
             {tabs.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 <Button variant="outline" size="sm" onClick={onAddHost}>
@@ -232,12 +229,17 @@ function SshPage() {
               </div>
             ) : (
               tabs.map((tab) => (
-                <div key={tab.key} className={cn("absolute inset-0 p-2", tab.key === activeKey ? "block" : "hidden")}>
+                <div
+                  key={tab.key}
+                  className={cn("absolute inset-0 p-2", tab.key === activeKey ? "block" : "hidden")}
+                >
                   <TerminalView
                     host={tab.host}
                     active={tab.key === activeKey}
                     onSession={(sid) =>
-                      setTabs((t) => t.map((x) => (x.key === tab.key ? { ...x, sessionId: sid } : x)))
+                      setTabs((t) =>
+                        t.map((x) => (x.key === tab.key ? { ...x, sessionId: sid } : x)),
+                      )
                     }
                     onClosed={() =>
                       setTabs((t) => t.map((x) => (x.key === tab.key ? { ...x, closed: true } : x)))
@@ -250,18 +252,12 @@ function SshPage() {
           </div>
 
           {activeTab && (
-            <ForwardsPanel
-              sessionId={activeTab.sessionId}
-              host={activeTab.host}
-              onError={flash}
-            />
+            <ForwardsPanel sessionId={activeTab.sessionId} host={activeTab.host} onError={flash} />
           )}
         </div>
       </div>
 
-      {editing && (
-        <HostForm initial={editing} onSave={saveHost} onClose={() => setEditing(null)} />
-      )}
+      {editing && <HostForm initial={editing} onSave={saveHost} onClose={() => setEditing(null)} />}
       {importing && (
         <ImportDialog
           found={importing}

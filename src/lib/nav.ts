@@ -1,9 +1,4 @@
-import {
-  GitPullRequestIcon,
-  HomeIcon,
-  TerminalIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { GitPullRequestIcon, HomeIcon, TerminalIcon, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   title: string;

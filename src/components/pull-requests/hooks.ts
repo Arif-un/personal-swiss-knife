@@ -64,8 +64,7 @@ export function usePrViews() {
     queryKey: prKeys.views(),
     queryFn: () => prViewsApi.list(),
   });
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: prKeys.views() });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: prKeys.views() });
 
   const saveMutation = useMutation({
     mutationFn: prViewsApi.save,

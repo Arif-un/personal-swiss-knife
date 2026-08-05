@@ -39,7 +39,12 @@ function HostListImpl({
       <div className="flex items-center justify-between px-3 py-3">
         <span className="text-sm font-semibold">Hosts</span>
         <div className="flex gap-1">
-          <Button variant="outline" size="icon-xs" onClick={onImport} aria-label="Import from shell history">
+          <Button
+            variant="outline"
+            size="icon-xs"
+            onClick={onImport}
+            aria-label="Import from shell history"
+          >
             <HistoryIcon />
           </Button>
           <Button variant="outline" size="icon-xs" onClick={onAdd} aria-label="Add host">
@@ -94,13 +99,28 @@ function HostListImpl({
             </div>
 
             <div className="ml-5 mt-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-              <Button variant="ghost" size="icon-xs" onClick={() => onCopyCommand(host)} aria-label="Copy ssh command">
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => onCopyCommand(host)}
+                aria-label="Copy ssh command"
+              >
                 <CopyIcon />
               </Button>
-              <Button variant="ghost" size="icon-xs" onClick={() => onEdit(host)} aria-label="Edit host">
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => onEdit(host)}
+                aria-label="Edit host"
+              >
                 <PencilIcon />
               </Button>
-              <Button variant="ghost" size="icon-xs" onClick={() => onDelete(host)} aria-label="Delete host">
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => onDelete(host)}
+                aria-label="Delete host"
+              >
                 <Trash2Icon />
               </Button>
             </div>
