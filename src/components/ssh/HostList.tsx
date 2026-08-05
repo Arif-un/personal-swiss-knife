@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   ArrowRightLeftIcon,
   CopyIcon,
@@ -23,7 +24,7 @@ interface Props {
   onImport: () => void;
 }
 
-export function HostList({
+function HostListImpl({
   hosts,
   loading,
   onConnect,
@@ -109,3 +110,5 @@ export function HostList({
     </div>
   );
 }
+
+export const HostList = memo(HostListImpl);

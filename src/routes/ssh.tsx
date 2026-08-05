@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoute } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listen } from "@tauri-apps/api/event";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, XIcon } from "lucide-react";
 import { rootRoute } from "./__root.tsx";
 import { Button } from "#components/ui/button.tsx";
 import { cn } from "#lib/utils.ts";
-import { sshApi } from "#components/ssh/api.ts";
+import { sshApi, sshEvents, sshKeys } from "#components/ssh/api.ts";
+import { TERM_BACKGROUND, TOAST_DURATION_MS } from "#components/ssh/constants.ts";
 import { HostList } from "#components/ssh/HostList.tsx";
 import { HostForm } from "#components/ssh/HostForm.tsx";
 import { HostKeyDialog } from "#components/ssh/HostKeyDialog.tsx";
@@ -22,12 +22,22 @@ interface Tab {
   closed: boolean;
 }
 
+// Ignore repeat connect requests for the same host within this window, so a
+// double-click (two click events + a dblclick) opens a single tab.
+const CONNECT_DEBOUNCE_MS = 500;
+
+function plural(n: number, word: string) {
+  return `${word}${n === 1 ? "" : "s"}`;
+}
+
 function SshPage() {
   const qc = useQueryClient();
   const { data: hosts = [], isLoading } = useQuery<Host[]>({
-    queryKey: ["ssh-hosts"],
+    queryKey: sshKeys.hosts(),
     queryFn: () => sshApi.hostsList(),
   });
+  const invalidateHosts = () =>
+    qc.invalidateQueries({ queryKey: sshKeys.hosts() });
 
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -36,24 +46,75 @@ function SshPage() {
   const [prompt, setPrompt] = useState<HostKeyPrompt | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  const toastTimer = useRef<number | null>(null);
+  const flash = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), TOAST_DURATION_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+
+  // Host-key prompts arrive as backend events.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    listen<HostKeyPrompt>("ssh://hostkey", (e) => setPrompt(e.payload)).then((u) => {
-      unlisten = u;
+    let cancelled = false;
+    sshEvents.onHostkey((e) => setPrompt(e.payload)).then((u) => {
+      // If we unmounted before the listener registered, drop it now.
+      if (cancelled) u();
+      else unlisten = u;
     });
-    return () => unlisten?.();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
-  function flash(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2000);
-  }
+  const saveMutation = useMutation({
+    mutationFn: (host: Host) => sshApi.hostSave(host),
+    onSuccess: invalidateHosts,
+    onError: (err) => flash(String(err)),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (host: Host) => sshApi.hostDelete(host),
+    onSuccess: invalidateHosts,
+    onError: (err) => flash(String(err)),
+  });
+  const importMutation = useMutation({
+    mutationFn: async (toImport: Host[]) => {
+      const results = await Promise.allSettled(
+        toImport.map((h) => sshApi.hostSave(h)),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { total: toImport.length, failed };
+    },
+    onSuccess: ({ total, failed }) => {
+      invalidateHosts();
+      setImporting(null);
+      const ok = total - failed;
+      flash(
+        failed > 0
+          ? `Imported ${ok}/${total} ${plural(total, "host")} (${failed} failed)`
+          : `Imported ${ok} ${plural(ok, "host")}`,
+      );
+    },
+    onError: (err) => flash(String(err)),
+  });
 
-  function connect(host: Host) {
+  const lastConnectRef = useRef<{ id: string; t: number } | null>(null);
+  const connect = useCallback((host: Host) => {
+    const now = Date.now();
+    const last = lastConnectRef.current;
+    if (last && last.id === host.id && now - last.t < CONNECT_DEBOUNCE_MS) return;
+    lastConnectRef.current = { id: host.id, t: now };
     const key = crypto.randomUUID();
     setTabs((t) => [...t, { key, host, sessionId: null, closed: false }]);
     setActiveKey(key);
-  }
+  }, []);
 
   function closeTab(key: string) {
     setTabs((t) => t.filter((tab) => tab.key !== key));
@@ -64,58 +125,49 @@ function SshPage() {
     });
   }
 
-  async function saveHost(host: Host) {
-    try {
-      await sshApi.hostSave(host);
-      setEditing(null);
-      qc.invalidateQueries({ queryKey: ["ssh-hosts"] });
-    } catch (err) {
-      flash(String(err));
-    }
-  }
+  const saveHost = useCallback(
+    (host: Host) => {
+      saveMutation.mutate(host, { onSuccess: () => setEditing(null) });
+    },
+    [saveMutation],
+  );
+  const deleteHost = useCallback(
+    (host: Host) => deleteMutation.mutate(host),
+    [deleteMutation],
+  );
 
-  async function deleteHost(host: Host) {
-    try {
-      await sshApi.hostDelete(host);
-      qc.invalidateQueries({ queryKey: ["ssh-hosts"] });
-    } catch (err) {
-      flash(String(err));
-    }
-  }
-
-  async function openImport() {
+  const openImport = useCallback(async () => {
     try {
       const found = await sshApi.discoverHistory();
       setImporting(found);
     } catch (err) {
       flash(String(err));
     }
-  }
+  }, [flash]);
 
-  async function importHosts(hosts: Host[]) {
-    try {
-      for (const h of hosts) await sshApi.hostSave(h);
-      setImporting(null);
-      qc.invalidateQueries({ queryKey: ["ssh-hosts"] });
-      flash(`Imported ${hosts.length} host${hosts.length === 1 ? "" : "s"}`);
-    } catch (err) {
-      flash(String(err));
-    }
-  }
+  const copyCommand = useCallback(
+    async (host: Host) => {
+      try {
+        const cmd = await sshApi.buildCommand(host.id);
+        await navigator.clipboard.writeText(cmd);
+        flash("Copied: " + cmd);
+      } catch (err) {
+        flash(String(err));
+      }
+    },
+    [flash],
+  );
 
-  async function copyCommand(host: Host) {
-    try {
-      const cmd = await sshApi.buildCommand(host.id);
-      await navigator.clipboard.writeText(cmd);
-      flash("Copied: " + cmd);
-    } catch (err) {
-      flash(String(err));
-    }
-  }
+  const onAddHost = useCallback(() => setEditing(emptyHost()), []);
+  const onEditHost = useCallback((h: Host) => setEditing(h), []);
 
   async function decideHostkey(trust: boolean) {
     if (!prompt) return;
-    await sshApi.trustHostkey(prompt.promptId, trust).catch(() => {});
+    try {
+      await sshApi.trustHostkey(prompt.promptId, trust);
+    } catch (err) {
+      flash(String(err));
+    }
     setPrompt(null);
   }
 
@@ -128,8 +180,8 @@ function SshPage() {
           hosts={hosts}
           loading={isLoading}
           onConnect={connect}
-          onAdd={() => setEditing(emptyHost())}
-          onEdit={(h) => setEditing(h)}
+          onAdd={onAddHost}
+          onEdit={onEditHost}
           onDelete={deleteHost}
           onCopyCommand={copyCommand}
           onImport={openImport}
@@ -168,10 +220,13 @@ function SshPage() {
           </div>
 
           {/* terminals */}
-          <div className="relative min-h-0 flex-1 bg-[#181825]">
+          <div
+            className="relative min-h-0 flex-1"
+            style={{ backgroundColor: TERM_BACKGROUND }}
+          >
             {tabs.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                <Button variant="outline" size="sm" onClick={() => setEditing(emptyHost())}>
+                <Button variant="outline" size="sm" onClick={onAddHost}>
                   <PlusIcon /> Add a host to begin
                 </Button>
               </div>
@@ -187,14 +242,20 @@ function SshPage() {
                     onClosed={() =>
                       setTabs((t) => t.map((x) => (x.key === tab.key ? { ...x, closed: true } : x)))
                     }
-                    onError={(msg) => flash(msg)}
+                    onError={flash}
                   />
                 </div>
               ))
             )}
           </div>
 
-          {activeTab && <ForwardsPanel sessionId={activeTab.sessionId} host={activeTab.host} />}
+          {activeTab && (
+            <ForwardsPanel
+              sessionId={activeTab.sessionId}
+              host={activeTab.host}
+              onError={flash}
+            />
+          )}
         </div>
       </div>
 
@@ -202,7 +263,11 @@ function SshPage() {
         <HostForm initial={editing} onSave={saveHost} onClose={() => setEditing(null)} />
       )}
       {importing && (
-        <ImportDialog found={importing} onImport={importHosts} onClose={() => setImporting(null)} />
+        <ImportDialog
+          found={importing}
+          onImport={(hostsToImport) => importMutation.mutate(hostsToImport)}
+          onClose={() => setImporting(null)}
+        />
       )}
       {prompt && <HostKeyDialog prompt={prompt} onDecide={decideHostkey} />}
       {toast && (

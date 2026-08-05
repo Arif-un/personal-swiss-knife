@@ -1,5 +1,6 @@
 import { ShieldAlertIcon } from "lucide-react";
 import { Button } from "#components/ui/button.tsx";
+import { Modal } from "#components/Modal.tsx";
 import type { HostKeyPrompt } from "./types.ts";
 
 interface Props {
@@ -9,7 +10,7 @@ interface Props {
 
 export function HostKeyDialog({ prompt, onDecide }: Props) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <Modal>
       <div className="w-full max-w-md rounded-xl border bg-background p-5 shadow-lg">
         <div className="mb-3 flex items-center gap-2">
           <ShieldAlertIcon className="size-5 text-amber-500" />
@@ -28,6 +29,6 @@ export function HostKeyDialog({ prompt, onDecide }: Props) {
           <Button onClick={() => onDecide(true)}>Trust &amp; connect</Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

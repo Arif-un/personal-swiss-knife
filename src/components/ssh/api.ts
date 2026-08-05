@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ForwardInfo, ForwardSpec, Host } from "./types.ts";
+import { listen, type Event } from "@tauri-apps/api/event";
+import type {
+  ForwardInfo,
+  ForwardSpec,
+  Host,
+  HostKeyPrompt,
+  SshClosedEvent,
+  SshDataEvent,
+} from "./types.ts";
 
 export const sshApi = {
   hostsList: () => invoke<Host[]>("hosts_list"),
@@ -26,4 +34,27 @@ export const sshApi = {
     invoke<void>("forward_stop", { sessionId, forwardId }),
   forwardsList: (sessionId: string) =>
     invoke<ForwardInfo[]>("forwards_list", { sessionId }),
+};
+
+/** Tauri event channel names emitted by the SSH backend. */
+export const SSH_EVENTS = {
+  data: "ssh://data",
+  closed: "ssh://closed",
+  hostkey: "ssh://hostkey",
+} as const;
+
+/** Typed `listen` wrappers so channel names live in one place (parity with the
+ *  invoke wrappers above). Each returns the unlisten promise. */
+export const sshEvents = {
+  onData: (cb: (e: Event<SshDataEvent>) => void) =>
+    listen<SshDataEvent>(SSH_EVENTS.data, cb),
+  onClosed: (cb: (e: Event<SshClosedEvent>) => void) =>
+    listen<SshClosedEvent>(SSH_EVENTS.closed, cb),
+  onHostkey: (cb: (e: Event<HostKeyPrompt>) => void) =>
+    listen<HostKeyPrompt>(SSH_EVENTS.hostkey, cb),
+};
+
+/** react-query keys for the SSH feature. */
+export const sshKeys = {
+  hosts: () => ["ssh-hosts"] as const,
 };

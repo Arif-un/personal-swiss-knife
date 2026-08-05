@@ -2,6 +2,8 @@ import { useState } from "react";
 import { PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { Button } from "#components/ui/button.tsx";
 import { Input } from "#components/ui/input.tsx";
+import { Modal } from "#components/Modal.tsx";
+import { DEFAULT_BIND_ADDR, DEFAULT_SSH_PORT } from "./constants.ts";
 import type { ForwardSpec, Host } from "./types.ts";
 
 interface Props {
@@ -21,6 +23,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export function HostForm({ initial, onSave, onClose }: Props) {
   const [h, setH] = useState<Host>({ ...initial, forwards: [...initial.forwards] });
+  // Stable per-row keys so editing/removing a forward can't rebind inputs to
+  // the wrong row (an index key would).
+  const [forwardKeys, setForwardKeys] = useState<string[]>(() =>
+    initial.forwards.map(() => crypto.randomUUID()),
+  );
 
   function set<K extends keyof Host>(key: K, value: Host[K]) {
     setH((prev) => ({ ...prev, [key]: value }));
@@ -38,19 +45,21 @@ export function HostForm({ initial, onSave, onClose }: Props) {
       ...prev,
       forwards: [
         ...prev.forwards,
-        { type: "L", bindAddr: "127.0.0.1", bindPort: 0, destHost: "", destPort: 0 },
+        { type: "L", bindAddr: DEFAULT_BIND_ADDR, bindPort: 0, destHost: "", destPort: 0 },
       ],
     }));
+    setForwardKeys((prev) => [...prev, crypto.randomUUID()]);
   }
 
   function removeForward(i: number) {
     setH((prev) => ({ ...prev, forwards: prev.forwards.filter((_, idx) => idx !== i) }));
+    setForwardKeys((prev) => prev.filter((_, idx) => idx !== i));
   }
 
   const isNew = !initial.id;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <Modal>
       <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border bg-background shadow-lg">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="text-sm font-semibold">{isNew ? "New host" : `Edit ${initial.alias}`}</h2>
@@ -80,7 +89,7 @@ export function HostForm({ initial, onSave, onClose }: Props) {
               <Input
                 type="number"
                 value={h.port}
-                onChange={(e) => set("port", Number(e.target.value) || 22)}
+                onChange={(e) => set("port", Number(e.target.value) || DEFAULT_SSH_PORT)}
               />
             </Field>
           </div>
@@ -118,7 +127,7 @@ export function HostForm({ initial, onSave, onClose }: Props) {
               </Button>
             </div>
             {h.forwards.map((f, i) => (
-              <div key={i} className="flex items-center gap-1.5">
+              <div key={forwardKeys[i]} className="flex items-center gap-1.5">
                 <Input
                   className="h-7 w-28"
                   value={f.bindAddr}
@@ -173,6 +182,6 @@ export function HostForm({ initial, onSave, onClose }: Props) {
           </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

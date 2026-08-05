@@ -1,3 +1,5 @@
+import { DEFAULT_SSH_PORT } from "./constants.ts";
+
 export interface ForwardSpec {
   type: "L";
   bindAddr: string;
@@ -49,11 +51,11 @@ export function emptyHost(): Host {
     alias: "",
     hostname: "",
     user: "",
-    port: 22,
-    identityFile: "",
+    port: DEFAULT_SSH_PORT,
+    identityFile: null,
     useAgent: true,
-    proxyJump: "",
+    proxyJump: null,
     forwards: [],
-    extraOptions: "",
+    extraOptions: null,
   };
 }
