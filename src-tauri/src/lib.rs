@@ -338,6 +338,62 @@ fn fetch_unresolved_comment_counts(
     Ok(counts)
 }
 
+/// Report whether each PR is currently sitting in the repo's merge queue.
+/// Returns a map of PR number -> in-queue flag. `isInMergeQueue` is not exposed
+/// by `gh pr list --json`, so it is fetched over batched aliased GraphQL like
+/// the other per-PR metrics.
+#[tauri::command]
+fn fetch_merge_queue_status(
+    repo: String,
+    numbers: Vec<u64>,
+) -> Result<HashMap<u64, bool>, String> {
+    let (owner, name) = repo
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo '{repo}', expected owner/name"))?;
+
+    let mut statuses: HashMap<u64, bool> = HashMap::new();
+
+    for chunk in numbers.chunks(20) {
+        if chunk.is_empty() {
+            continue;
+        }
+
+        let mut fields = String::new();
+        for n in chunk {
+            fields.push_str(&format!(
+                "p{n}: pullRequest(number: {n}) {{ isInMergeQueue }} "
+            ));
+        }
+        let query =
+            format!("query {{ repository(owner: \"{owner}\", name: \"{name}\") {{ {fields} }} }}");
+
+        let output = Command::new("gh")
+            .args(["api", "graphql", "-f"])
+            .arg(format!("query={query}"))
+            .output()
+            .map_err(|e| format!("Failed to run gh CLI: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("gh command failed: {stderr}"));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let v: serde_json::Value =
+            serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+
+        let repo_obj = &v["data"]["repository"];
+        for n in chunk {
+            let queued = repo_obj[format!("p{n}")]["isInMergeQueue"]
+                .as_bool()
+                .unwrap_or(false);
+            statuses.insert(*n, queued);
+        }
+    }
+
+    Ok(statuses)
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -354,6 +410,7 @@ pub fn run() {
             readd_ci_label,
             fetch_ci_label_counts,
             fetch_unresolved_comment_counts,
+            fetch_merge_queue_status,
             pr_views::pr_views_list,
             pr_views::pr_views_save,
             pr_views::pr_views_delete,

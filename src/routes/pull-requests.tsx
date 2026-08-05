@@ -61,19 +61,18 @@ function countActive(f: Filters): number {
   return n;
 }
 
-function stateBadge(pr: PullRequest): {
-  label: string;
-  variant: "default" | "secondary" | "destructive" | "outline";
-} {
-  if (pr.isDraft) return { label: "Draft", variant: "secondary" };
-  switch (pr.state.toUpperCase()) {
-    case "MERGED":
-      return { label: "Merged", variant: "outline" };
-    case "CLOSED":
-      return { label: "Closed", variant: "destructive" };
-    default:
-      return { label: "Open", variant: "default" };
-  }
+// Small colored dot shown before the title reflecting the PR's overall status.
+function statusDot(
+  pr: PullRequest,
+  queued: boolean,
+): { color: string; label: string } {
+  if (pr.state.toUpperCase() === "MERGED")
+    return { color: "bg-purple-500", label: "Merged" };
+  if (pr.isDraft) return { color: "bg-muted-foreground/40", label: "Draft" };
+  if (queued) return { color: "bg-orange-500", label: "In merge queue" };
+  if (pr.state.toUpperCase() === "CLOSED")
+    return { color: "bg-red-500", label: "Closed" };
+  return { color: "bg-blue-500", label: "Open" };
 }
 
 function PullRequestsPage() {
@@ -128,6 +127,18 @@ function PullRequestsPage() {
     enabled: searchRepo.trim().length > 0 && prNumbers.length > 0,
   });
   const unresolvedCounts = unresolvedQuery.data ?? {};
+
+  // Whether each PR is currently in the repo's merge queue, keyed by PR number.
+  const mergeQueueQuery = useQuery<Record<string, boolean>>({
+    queryKey: ["merge-queue-status", searchRepo, prNumbers],
+    queryFn: () =>
+      invoke<Record<string, boolean>>("fetch_merge_queue_status", {
+        repo: searchRepo,
+        numbers: prNumbers,
+      }),
+    enabled: searchRepo.trim().length > 0 && prNumbers.length > 0,
+  });
+  const mergeQueueStatus = mergeQueueQuery.data ?? {};
 
   // Adds the CI label; if already present it is removed then re-added to force
   // a fresh label event. Backend returns the PR's labels after the operation.
@@ -457,7 +468,6 @@ function PullRequestsPage() {
                 <TableHead>Title</TableHead>
                 <TableHead className="w-32">Author</TableHead>
                 <TableHead className="w-32">Branch</TableHead>
-                <TableHead className="w-24">Status</TableHead>
                 <TableHead className="w-28">Date</TableHead>
                 <TableHead className="w-12 text-center">CI</TableHead>
               </TableRow>
@@ -466,7 +476,7 @@ function PullRequestsPage() {
               {prs.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={6}
                     className="text-center text-muted-foreground"
                   >
                     No pull requests match these filters.
@@ -474,7 +484,6 @@ function PullRequestsPage() {
                 </TableRow>
               )}
               {prs.map((pr) => {
-                const badge = stateBadge(pr);
                 const hasCi = pr.labels.some(
                   (l) => l.toLowerCase() === CI_LABEL.toLowerCase(),
                 );
@@ -483,20 +492,30 @@ function PullRequestsPage() {
                 const ciCount = ciCounts[String(pr.number)] ?? 0;
                 const unresolvedCount =
                   unresolvedCounts[String(pr.number)] ?? 0;
+                const dot = statusDot(
+                  pr,
+                  mergeQueueStatus[String(pr.number)] ?? false,
+                );
                 return (
                   <TableRow key={pr.number}>
                     <TableCell className="font-mono text-muted-foreground">
                       {pr.number}
                     </TableCell>
                     <TableCell>
-                      <a
-                        href={pr.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium hover:underline"
-                      >
-                        {pr.title}
-                      </a>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className={`inline-block size-2 shrink-0 rounded-full ${dot.color}`}
+                          title={dot.label}
+                        />
+                        <a
+                          href={pr.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium hover:underline"
+                        >
+                          {pr.title}
+                        </a>
+                      </span>
                       <div
                         className={
                           unresolvedCount > 0
@@ -522,9 +541,6 @@ function PullRequestsPage() {
                       <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
                         {pr.headRefName}
                       </code>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={badge.variant}>{badge.label}</Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDate(pr.createdAt)}
