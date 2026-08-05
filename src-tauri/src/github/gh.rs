@@ -119,7 +119,10 @@ mod tests {
 
     #[test]
     fn split_repo_valid() {
-        assert_eq!(split_repo("owner/name").unwrap(), ("owner".into(), "name".into()));
+        assert_eq!(
+            split_repo("owner/name").unwrap(),
+            ("owner".into(), "name".into())
+        );
     }
 
     #[test]

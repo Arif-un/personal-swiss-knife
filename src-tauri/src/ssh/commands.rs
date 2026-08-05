@@ -245,7 +245,10 @@ pub async fn forwards_list(
         .map(|e| {
             e.forwards
                 .iter()
-                .map(|(id, f)| ForwardInfo { id: id.clone(), spec: f.spec.clone() })
+                .map(|(id, f)| ForwardInfo {
+                    id: id.clone(),
+                    spec: f.spec.clone(),
+                })
                 .collect()
         })
         .unwrap_or_default();

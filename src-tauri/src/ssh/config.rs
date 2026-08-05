@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::ssh::{
-    ForwardSpec, Host, HostSource, SshResult, DEFAULT_BIND_ADDR, DEFAULT_SSH_PORT,
-};
+use crate::ssh::{ForwardSpec, Host, HostSource, SshResult, DEFAULT_BIND_ADDR, DEFAULT_SSH_PORT};
 
 /// Path to `~/.ssh/config`.
 pub fn ssh_config_path() -> SshResult<PathBuf> {
@@ -41,7 +39,11 @@ fn parse_lines(lines: Vec<String>) -> Parsed {
         let trimmed = lines[i].trim();
         let lower = trimmed.to_lowercase();
         if lower.starts_with("host ") || lower == "host" {
-            let alias = trimmed[4..].split_whitespace().next().unwrap_or("").to_string();
+            let alias = trimmed[4..]
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string();
             let start = i;
             i += 1;
             while i < lines.len() {
@@ -54,7 +56,12 @@ fn parse_lines(lines: Vec<String>) -> Parsed {
             let end = i;
             if !alias.is_empty() {
                 let host = block_to_host(&alias, &lines[start..end]);
-                blocks.push(Block { alias, start, end, host });
+                blocks.push(Block {
+                    alias,
+                    start,
+                    end,
+                    host,
+                });
             }
         } else {
             i += 1;

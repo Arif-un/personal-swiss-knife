@@ -10,7 +10,9 @@ use super::{GithubResult, PrCheck, PrFilters, PullRequest, CI_LABEL, DEFAULT_LIM
 
 /// Trim a filter value and drop it if empty.
 fn clean(value: Option<String>) -> Option<String> {
-    value.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 #[tauri::command]
@@ -56,7 +58,12 @@ pub fn fetch_pull_requests(
     }
 
     args.push("--limit".into());
-    args.push(f.limit.filter(|n| *n > 0).unwrap_or(DEFAULT_LIMIT).to_string());
+    args.push(
+        f.limit
+            .filter(|n| *n > 0)
+            .unwrap_or(DEFAULT_LIMIT)
+            .to_string(),
+    );
 
     args.push("--json".into());
     args.push("number,title,author,createdAt,url,isDraft,headRefName,state,labels".into());
@@ -112,30 +119,32 @@ pub fn readd_ci_label(repo: String, number: u64) -> Result<Vec<String>, String> 
 /// Count how many times the CI label was *added* (`labeled` events) to each PR.
 /// Only the most recent `GRAPHQL_PAGE` label events per PR are inspected.
 #[tauri::command]
-pub fn fetch_ci_label_counts(
-    repo: String,
-    numbers: Vec<u64>,
-) -> Result<HashMap<u64, u64>, String> {
+pub fn fetch_ci_label_counts(repo: String, numbers: Vec<u64>) -> Result<HashMap<u64, u64>, String> {
     let selection = format!(
         "timelineItems(itemTypes: [LABELED_EVENT], first: {GRAPHQL_PAGE}) {{ \
            nodes {{ ... on LabeledEvent {{ label {{ name }} }} }} \
          }}"
     );
-    Ok(gh::batched_pr_graphql(&repo, &numbers, &selection, |node| {
-        node["timelineItems"]["nodes"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter(|n| {
-                        n["label"]["name"]
-                            .as_str()
-                            .map(|s| s.eq_ignore_ascii_case(CI_LABEL))
-                            .unwrap_or(false)
-                    })
-                    .count() as u64
-            })
-            .unwrap_or(0)
-    })?)
+    Ok(gh::batched_pr_graphql(
+        &repo,
+        &numbers,
+        &selection,
+        |node| {
+            node["timelineItems"]["nodes"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter(|n| {
+                            n["label"]["name"]
+                                .as_str()
+                                .map(|s| s.eq_ignore_ascii_case(CI_LABEL))
+                                .unwrap_or(false)
+                        })
+                        .count() as u64
+                })
+                .unwrap_or(0)
+        },
+    )?)
 }
 
 /// Count the unresolved review threads (conversations) for each PR.
@@ -146,16 +155,21 @@ pub fn fetch_unresolved_comment_counts(
     numbers: Vec<u64>,
 ) -> Result<HashMap<u64, u64>, String> {
     let selection = format!("reviewThreads(first: {GRAPHQL_PAGE}) {{ nodes {{ isResolved }} }}");
-    Ok(gh::batched_pr_graphql(&repo, &numbers, &selection, |node| {
-        node["reviewThreads"]["nodes"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter(|n| !n["isResolved"].as_bool().unwrap_or(false))
-                    .count() as u64
-            })
-            .unwrap_or(0)
-    })?)
+    Ok(gh::batched_pr_graphql(
+        &repo,
+        &numbers,
+        &selection,
+        |node| {
+            node["reviewThreads"]["nodes"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter(|n| !n["isResolved"].as_bool().unwrap_or(false))
+                        .count() as u64
+                })
+                .unwrap_or(0)
+        },
+    )?)
 }
 
 /// Report whether each PR is currently sitting in the repo's merge queue.

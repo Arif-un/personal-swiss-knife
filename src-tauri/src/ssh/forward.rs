@@ -22,7 +22,12 @@ pub async fn start(handle: Arc<Handle<Client>>, spec: ForwardSpec) -> SshResult<
     }
     let listener = TcpListener::bind((spec.bind_addr.as_str(), spec.bind_port))
         .await
-        .map_err(|e| SshError::msg(format!("bind {}:{} failed: {e}", spec.bind_addr, spec.bind_port)))?;
+        .map_err(|e| {
+            SshError::msg(format!(
+                "bind {}:{} failed: {e}",
+                spec.bind_addr, spec.bind_port
+            ))
+        })?;
 
     let spec_for_task = spec.clone();
     let task = tokio::spawn(async move {
@@ -36,7 +41,12 @@ pub async fn start(handle: Arc<Handle<Client>>, spec: ForwardSpec) -> SshResult<
             let dest_port = spec_for_task.dest_port;
             tokio::spawn(async move {
                 if let Ok(channel) = h
-                    .channel_open_direct_tcpip(dest_host, dest_port as u32, DEFAULT_BIND_ADDR.to_string(), 0)
+                    .channel_open_direct_tcpip(
+                        dest_host,
+                        dest_port as u32,
+                        DEFAULT_BIND_ADDR.to_string(),
+                        0,
+                    )
                     .await
                 {
                     let mut stream = channel.into_stream();

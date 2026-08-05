@@ -98,21 +98,35 @@ impl Client {
         prompt_id: String,
         hostkey_prompts: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     ) -> Self {
-        Client { app, host, port, prompt_id, hostkey_prompts }
+        Client {
+            app,
+            host,
+            port,
+            prompt_id,
+            hostkey_prompts,
+        }
     }
 }
 
 impl client::Handler for Client {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, server_public_key: &PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &PublicKey,
+    ) -> Result<bool, Self::Error> {
         match known_hosts::check(&self.host, self.port, server_public_key) {
             HostKeyStatus::Trusted => Ok(true),
             HostKeyStatus::Changed => Ok(false),
             HostKeyStatus::Unknown => {
                 let (tx, rx) = oneshot::channel();
-                self.hostkey_prompts.lock().await.insert(self.prompt_id.clone(), tx);
-                let fingerprint = server_public_key.fingerprint(russh::keys::HashAlg::Sha256).to_string();
+                self.hostkey_prompts
+                    .lock()
+                    .await
+                    .insert(self.prompt_id.clone(), tx);
+                let fingerprint = server_public_key
+                    .fingerprint(russh::keys::HashAlg::Sha256)
+                    .to_string();
                 let algorithm = server_public_key.algorithm().as_str().to_string();
                 let _ = self.app.emit(
                     EVENT_SSH_HOSTKEY,
@@ -235,7 +249,8 @@ pub async fn connect(
 
     let mut jump_keepalive: Option<Handle<Client>> = None;
 
-    let mut handle: Handle<Client> = match host.proxy_jump.clone().filter(|s| !s.trim().is_empty()) {
+    let mut handle: Handle<Client> = match host.proxy_jump.clone().filter(|s| !s.trim().is_empty())
+    {
         Some(pj) => {
             let jhost = config::resolve_jump(&pj, &all);
             let jclient = Client::new(
@@ -245,8 +260,12 @@ pub async fn connect(
                 format!("{session_id}:jump"),
                 state.hostkey_prompts.clone(),
             );
-            let mut jhandle =
-                client::connect(config.clone(), (jhost.hostname.as_str(), jhost.port), jclient).await?;
+            let mut jhandle = client::connect(
+                config.clone(),
+                (jhost.hostname.as_str(), jhost.port),
+                jclient,
+            )
+            .await?;
             authenticate(&mut jhandle, &jhost).await?;
 
             let channel = jhandle
@@ -287,7 +306,9 @@ pub async fn connect(
     let handle = Arc::new(handle);
     let channel = handle.channel_open_session().await?;
     let term = std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into());
-    channel.request_pty(true, &term, cols, rows, 0, 0, &[]).await?;
+    channel
+        .request_pty(true, &term, cols, rows, 0, 0, &[])
+        .await?;
     channel.request_shell(true).await?;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<SessionCmd>();
@@ -328,7 +349,10 @@ pub async fn connect(
         }
         let _ = app2.emit(
             EVENT_SSH_CLOSED,
-            SshClosed { session_id: sid.clone(), reason: "disconnected".into() },
+            SshClosed {
+                session_id: sid.clone(),
+                reason: "disconnected".into(),
+            },
         );
         // Abort any port-forward listeners so they don't outlive the session
         // (dropping a JoinHandle only detaches it, leaving the port bound).

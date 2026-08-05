@@ -45,7 +45,9 @@ fn parse_ssh(cmd: &str) -> Option<Host> {
         match t {
             "-i" => {
                 i += 1;
-                identity = tokens.get(i).map(|s| s.trim_matches(['"', '\'']).to_string());
+                identity = tokens
+                    .get(i)
+                    .map(|s| s.trim_matches(['"', '\'']).to_string());
             }
             "-p" => {
                 i += 1;
