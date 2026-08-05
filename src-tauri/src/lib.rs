@@ -273,6 +273,71 @@ fn fetch_ci_label_counts(
     Ok(counts)
 }
 
+/// Count the unresolved review threads (conversations) for each PR. Returns a
+/// map of PR number -> unresolved count. PRs are batched into aliased GraphQL
+/// fields so a whole page of PRs costs only a few requests instead of one each.
+/// Note: only the most recent 100 review threads per PR are inspected.
+#[tauri::command]
+fn fetch_unresolved_comment_counts(
+    repo: String,
+    numbers: Vec<u64>,
+) -> Result<HashMap<u64, u64>, String> {
+    let (owner, name) = repo
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo '{repo}', expected owner/name"))?;
+
+    let mut counts: HashMap<u64, u64> = HashMap::new();
+
+    for chunk in numbers.chunks(20) {
+        if chunk.is_empty() {
+            continue;
+        }
+
+        let mut fields = String::new();
+        for n in chunk {
+            fields.push_str(&format!(
+                "p{n}: pullRequest(number: {n}) {{ \
+                   reviewThreads(first: 100) {{ \
+                     nodes {{ isResolved }} \
+                   }} \
+                 }} "
+            ));
+        }
+        let query =
+            format!("query {{ repository(owner: \"{owner}\", name: \"{name}\") {{ {fields} }} }}");
+
+        let output = Command::new("gh")
+            .args(["api", "graphql", "-f"])
+            .arg(format!("query={query}"))
+            .output()
+            .map_err(|e| format!("Failed to run gh CLI: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("gh command failed: {stderr}"));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let v: serde_json::Value =
+            serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+
+        let repo_obj = &v["data"]["repository"];
+        for n in chunk {
+            let count = repo_obj[format!("p{n}")]["reviewThreads"]["nodes"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter(|node| !node["isResolved"].as_bool().unwrap_or(false))
+                        .count() as u64
+                })
+                .unwrap_or(0);
+            counts.insert(*n, count);
+        }
+    }
+
+    Ok(counts)
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -288,6 +353,7 @@ pub fn run() {
             fetch_pull_requests,
             readd_ci_label,
             fetch_ci_label_counts,
+            fetch_unresolved_comment_counts,
             pr_views::pr_views_list,
             pr_views::pr_views_save,
             pr_views::pr_views_delete,

@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   FlaskConical,
   Loader2,
+  MessageSquare,
   RefreshCw,
   SlidersHorizontal,
   X,
@@ -115,6 +116,18 @@ function PullRequestsPage() {
     enabled: searchRepo.trim().length > 0 && prNumbers.length > 0,
   });
   const ciCounts = ciCountsQuery.data ?? {};
+
+  // Unresolved review threads (conversations) per PR, keyed by PR number.
+  const unresolvedQuery = useQuery<Record<string, number>>({
+    queryKey: ["unresolved-comment-counts", searchRepo, prNumbers],
+    queryFn: () =>
+      invoke<Record<string, number>>("fetch_unresolved_comment_counts", {
+        repo: searchRepo,
+        numbers: prNumbers,
+      }),
+    enabled: searchRepo.trim().length > 0 && prNumbers.length > 0,
+  });
+  const unresolvedCounts = unresolvedQuery.data ?? {};
 
   // Adds the CI label; if already present it is removed then re-added to force
   // a fresh label event. Backend returns the PR's labels after the operation.
@@ -468,6 +481,8 @@ function PullRequestsPage() {
                 const isCiPending =
                   ciMutation.isPending && ciMutation.variables === pr.number;
                 const ciCount = ciCounts[String(pr.number)] ?? 0;
+                const unresolvedCount =
+                  unresolvedCounts[String(pr.number)] ?? 0;
                 return (
                   <TableRow key={pr.number}>
                     <TableCell className="font-mono text-muted-foreground">
@@ -482,6 +497,23 @@ function PullRequestsPage() {
                       >
                         {pr.title}
                       </a>
+                      <div
+                        className={
+                          unresolvedCount > 0
+                            ? "mt-0.5 flex w-fit items-center gap-1 text-[9px] text-amber-600 dark:text-amber-500"
+                            : "mt-0.5 flex w-fit items-center gap-1 text-[9px] text-muted-foreground/40"
+                        }
+                        title={
+                          unresolvedCount > 0
+                            ? `${unresolvedCount} unresolved comment${unresolvedCount !== 1 ? "s" : ""}`
+                            : "No unresolved comments"
+                        }
+                      >
+                        <MessageSquare className="size-3" />
+                        {unresolvedCount > 0 && (
+                          <span className="tabular-nums">{unresolvedCount}</span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {pr.author}
