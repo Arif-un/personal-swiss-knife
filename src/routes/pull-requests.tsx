@@ -1,15 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  Ban,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
   FlaskConical,
   Loader2,
   MessageSquare,
+  MinusCircle,
   RefreshCw,
   SlidersHorizontal,
   X,
+  XCircle,
 } from "lucide-react";
 import { rootRoute } from "./__root.tsx";
 import { Input } from "#components/ui/input.tsx";
@@ -43,6 +49,16 @@ interface PullRequest {
   isDraft: boolean;
   state: string;
   labels: string[];
+}
+
+interface PrCheck {
+  name: string;
+  workflow: string;
+  bucket: string;
+  state: string;
+  link: string;
+  startedAt: string;
+  completedAt: string;
 }
 
 const CI_LABEL = "CI";
@@ -79,6 +95,17 @@ function PullRequestsPage() {
   const [repo, setRepo] = useState("");
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [showFilters, setShowFilters] = useState(false);
+
+  // PR numbers whose row is expanded to show CI checks. Multiple may be open.
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  function toggleExpand(number: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(number)) next.delete(number);
+      else next.add(number);
+      return next;
+    });
+  }
 
   // Committed values that actually drive the query.
   const [searchRepo, setSearchRepo] = useState("");
@@ -496,10 +523,25 @@ function PullRequestsPage() {
                   pr,
                   mergeQueueStatus[String(pr.number)] ?? false,
                 );
+                const isExpanded = expanded.has(pr.number);
                 return (
-                  <TableRow key={pr.number}>
+                  <Fragment key={pr.number}>
+                  <TableRow
+                    aria-expanded={isExpanded}
+                    className="cursor-pointer"
+                    onClick={(e) => {
+                      // Let links/buttons in the row keep their own behavior.
+                      if ((e.target as HTMLElement).closest("a,button")) return;
+                      toggleExpand(pr.number);
+                    }}
+                  >
                     <TableCell className="font-mono text-muted-foreground">
-                      {pr.number}
+                      <span className="inline-flex items-center gap-1">
+                        <ChevronRight
+                          className={`size-3 shrink-0 text-muted-foreground/60 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                        />
+                        {pr.number}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <span className="inline-flex items-center gap-1.5">
@@ -538,7 +580,7 @@ function PullRequestsPage() {
                       {pr.author}
                     </TableCell>
                     <TableCell>
-                      <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                      <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
                         {pr.headRefName}
                       </code>
                     </TableCell>
@@ -581,6 +623,14 @@ function PullRequestsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {isExpanded && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="bg-muted/30 p-0">
+                        <PrCheckList repo={searchRepo} number={pr.number} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 );
               })}
             </TableBody>
@@ -594,6 +644,107 @@ function PullRequestsPage() {
           {activeCount > 0 ? " (filtered)" : ""}
         </p>
       )}
+    </div>
+  );
+}
+
+// Icon reflecting a single check's outcome, keyed by `gh pr checks` bucket.
+function checkIcon(bucket: string) {
+  switch (bucket) {
+    case "pass":
+      return <CheckCircle2 className="size-3 shrink-0 text-green-500" />;
+    case "fail":
+      return <XCircle className="size-3 shrink-0 text-red-500" />;
+    case "pending":
+      return <Clock className="size-3 shrink-0 text-amber-500" />;
+    case "cancel":
+      return <Ban className="size-3 shrink-0 text-muted-foreground/50" />;
+    case "skipping":
+    default:
+      return <MinusCircle className="size-3 shrink-0 text-muted-foreground/50" />;
+  }
+}
+
+// Lazily fetched CI checks for one PR, grouped by workflow. Mounted only while
+// the row is expanded; a fresh fetch runs on every expand (no cache reuse).
+function PrCheckList({ repo, number }: { repo: string; number: number }) {
+  const { data, isLoading, error } = useQuery<PrCheck[]>({
+    queryKey: ["pr-checks", repo, number],
+    queryFn: () => invoke<PrCheck[]>("fetch_pr_checks", { repo, number }),
+    enabled: repo.trim().length > 0,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 p-3 text-[8px] text-muted-foreground">
+        <Loader2 className="size-3 animate-spin" />
+        Loading checks…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-3 text-[8px] text-destructive">
+        {error instanceof Error ? error.message : "Failed to load checks"}
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="p-3 text-[8px] text-muted-foreground">
+        No checks reported.
+      </div>
+    );
+  }
+
+  // Preserve first-seen order of both workflows and their checks.
+  const groups: { workflow: string; checks: PrCheck[] }[] = [];
+  for (const c of data) {
+    const key = c.workflow || "Other";
+    let group = groups.find((g) => g.workflow === key);
+    if (!group) {
+      group = { workflow: key, checks: [] };
+      groups.push(group);
+    }
+    group.checks.push(c);
+  }
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      {groups.map((group) => (
+        <div key={group.workflow} className="flex flex-col gap-1">
+          <div className="text-[8px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+            {group.workflow}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {group.checks.map((c, i) => (
+              <div
+                key={`${c.name}-${i}`}
+                className="flex items-center gap-1.5 text-[8px]"
+              >
+                {checkIcon(c.bucket)}
+                {c.link ? (
+                  <a
+                    href={c.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-foreground hover:underline"
+                  >
+                    {c.name}
+                  </a>
+                ) : (
+                  <span>{c.name}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

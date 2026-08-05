@@ -21,6 +21,24 @@ struct PullRequest {
     labels: Vec<String>,
 }
 
+#[derive(Serialize)]
+struct PrCheck {
+    name: String,
+    /// Workflow the check belongs to; used to group checks in the UI. May be
+    /// empty for non-Actions checks (external statuses).
+    workflow: String,
+    /// pass | fail | pending | skipping | cancel
+    bucket: String,
+    /// raw state, e.g. SUCCESS / FAILURE / PENDING / IN_PROGRESS
+    state: String,
+    /// URL to the check's logs/details.
+    link: String,
+    #[serde(rename = "startedAt")]
+    started_at: String,
+    #[serde(rename = "completedAt")]
+    completed_at: String,
+}
+
 const CI_LABEL: &str = "ci";
 
 #[derive(Deserialize, Default)]
@@ -394,6 +412,59 @@ fn fetch_merge_queue_status(
     Ok(statuses)
 }
 
+/// Fetch the CI checks for a single PR via `gh pr checks`. Returns one entry per
+/// check (job/status). `gh pr checks` exits non-zero when checks are failing,
+/// pending, or absent, so we parse stdout regardless of exit status and only
+/// error when there is neither usable JSON nor a recognizable "no checks" case.
+#[tauri::command]
+fn fetch_pr_checks(repo: String, number: u64) -> Result<Vec<PrCheck>, String> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "checks",
+            &number.to_string(),
+            "--repo",
+            &repo,
+            "--json",
+            "name,workflow,bucket,state,link,startedAt,completedAt",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run gh CLI: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+
+    if trimmed.is_empty() {
+        // No JSON came back. Distinguish "PR has no checks" from a real error.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.to_lowercase().contains("no checks") {
+            return Ok(Vec::new());
+        }
+        if !output.status.success() {
+            return Err(format!("gh command failed: {stderr}"));
+        }
+        return Ok(Vec::new());
+    }
+
+    let raw: Vec<serde_json::Value> =
+        serde_json::from_str(trimmed).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+
+    let checks: Vec<PrCheck> = raw
+        .into_iter()
+        .map(|v| PrCheck {
+            name: v["name"].as_str().unwrap_or("").to_string(),
+            workflow: v["workflow"].as_str().unwrap_or("").to_string(),
+            bucket: v["bucket"].as_str().unwrap_or("").to_string(),
+            state: v["state"].as_str().unwrap_or("").to_string(),
+            link: v["link"].as_str().unwrap_or("").to_string(),
+            started_at: v["startedAt"].as_str().unwrap_or("").to_string(),
+            completed_at: v["completedAt"].as_str().unwrap_or("").to_string(),
+        })
+        .collect();
+
+    Ok(checks)
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -411,6 +482,7 @@ pub fn run() {
             fetch_ci_label_counts,
             fetch_unresolved_comment_counts,
             fetch_merge_queue_status,
+            fetch_pr_checks,
             pr_views::pr_views_list,
             pr_views::pr_views_save,
             pr_views::pr_views_delete,
