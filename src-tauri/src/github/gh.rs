@@ -3,12 +3,51 @@
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::path::Path;
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::{GithubError, GithubResult, GRAPHQL_CHUNK};
+
+/// Directories a GUI-launched app must search for CLI tools. An app started from
+/// Finder/Dock inherits only a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`),
+/// which omits Homebrew, so tools like `gh` and `git` are otherwise invisible.
+const CLI_DIRS: [&str; 3] = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+
+/// Absolute path to the `gh` binary, resolved once. Falls back to a bare `gh`
+/// (relying on PATH) only if no known location exists. Override with `GH_PATH`.
+fn gh_binary() -> &'static str {
+    static GH: OnceLock<String> = OnceLock::new();
+    GH.get_or_init(|| {
+        if let Ok(p) = std::env::var("GH_PATH") {
+            if !p.trim().is_empty() {
+                return p;
+            }
+        }
+        for dir in CLI_DIRS {
+            let candidate = format!("{dir}/gh");
+            if Path::new(&candidate).exists() {
+                return candidate;
+            }
+        }
+        "gh".to_string()
+    })
+}
+
+/// PATH for the `gh` child process, prepending the CLI dirs to the inherited
+/// PATH so `gh` can locate `git` and other helpers even under a GUI launch.
+fn child_path() -> String {
+    let base = std::env::var("PATH").unwrap_or_default();
+    let prefix = CLI_DIRS.join(":");
+    if base.is_empty() {
+        prefix
+    } else {
+        format!("{prefix}:{base}")
+    }
+}
 
 /// Split `owner/name` into its parts, erroring on a malformed repo.
 pub fn split_repo(repo: &str) -> GithubResult<(String, String)> {
@@ -24,8 +63,9 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    Command::new("gh")
+    Command::new(gh_binary())
         .args(args)
+        .env("PATH", child_path())
         .output()
         .map_err(|e| GithubError::Spawn(e.to_string()))
 }
