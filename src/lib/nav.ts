@@ -1,4 +1,10 @@
-import { GitPullRequestIcon, HomeIcon, TerminalIcon, type LucideIcon } from "lucide-react";
+import {
+  GitPullRequestIcon,
+  HomeIcon,
+  MessageCircleIcon,
+  TerminalIcon,
+  type LucideIcon,
+} from "lucide-react";
 
 export interface NavItem {
   title: string;
@@ -23,5 +29,11 @@ export const navItems: NavItem[] = [
     path: "/ssh",
     icon: TerminalIcon,
     description: "Connect to hosts, open terminals, and forward ports.",
+  },
+  {
+    title: "Messenger",
+    path: "/messenger",
+    icon: MessageCircleIcon,
+    description: "Chat on Messenger in a light native window instead of a browser tab.",
   },
 ];

@@ -216,8 +216,16 @@ async fn authenticate(handle: &mut Handle<Client>, host: &Host) -> SshResult<()>
         return Ok(());
     }
 
-    if let Some(id) = &host.identity_file {
-        if !id.is_empty() && try_key_file(handle, &user, &expand_tilde(id)).await? {
+    // Treat an empty identity_file (field typed then cleared in the UI, which
+    // round-trips as Some("")) the same as None so default-key discovery still
+    // runs instead of being silently skipped.
+    let identity = host
+        .identity_file
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(id) = identity {
+        if try_key_file(handle, &user, &expand_tilde(id)).await? {
             return Ok(());
         }
     } else if let Some(home) = dirs::home_dir() {

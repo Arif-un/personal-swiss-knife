@@ -1,4 +1,5 @@
 mod github;
+mod messenger;
 mod ssh;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -6,6 +7,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ssh::session::SshState::new())
+        // Keep the Messenger window warm: closing it just hides it (instant
+        // reopen, notifications keep flowing). Use `messenger_close` to actually
+        // reclaim its RAM.
+        .on_window_event(|window, event| {
+            if window.label() == messenger::MESSENGER_LABEL {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             github::commands::fetch_pull_requests,
             github::commands::readd_ci_label,
@@ -31,6 +43,8 @@ pub fn run() {
             ssh::commands::forward_start,
             ssh::commands::forward_stop,
             ssh::commands::forwards_list,
+            messenger::commands::messenger_open,
+            messenger::commands::messenger_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

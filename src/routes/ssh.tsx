@@ -42,7 +42,11 @@ function SshPage() {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<Host | null>(null);
   const [importing, setImporting] = useState<Host[] | null>(null);
-  const [prompt, setPrompt] = useState<HostKeyPrompt | null>(null);
+  // Queue of pending host-key prompts. Concurrent connects to distinct unknown
+  // hosts each emit a prompt; we show them one at a time (front of queue) so a
+  // later prompt never clobbers an unanswered earlier one (which would leave
+  // that connect hanging until its backend timeout).
+  const [prompts, setPrompts] = useState<HostKeyPrompt[]>([]);
   const [toast, setToast] = useState<string | null>(null);
 
   const toastTimer = useRef<number | null>(null);
@@ -63,7 +67,11 @@ function SshPage() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     sshEvents
-      .onHostkey((e) => setPrompt(e.payload))
+      .onHostkey((e) =>
+        setPrompts((q) =>
+          q.some((p) => p.promptId === e.payload.promptId) ? q : [...q, e.payload],
+        ),
+      )
       .then((u) => {
         // If we unmounted before the listener registered, drop it now.
         if (cancelled) u();
@@ -158,13 +166,14 @@ function SshPage() {
   const onEditHost = useCallback((h: Host) => setEditing(h), []);
 
   async function decideHostkey(trust: boolean) {
-    if (!prompt) return;
+    const current = prompts[0];
+    if (!current) return;
     try {
-      await sshApi.trustHostkey(prompt.promptId, trust);
+      await sshApi.trustHostkey(current.promptId, trust);
     } catch (err) {
       flash(String(err));
     }
-    setPrompt(null);
+    setPrompts((q) => q.filter((p) => p.promptId !== current.promptId));
   }
 
   const activeTab = tabs.find((t) => t.key === activeKey) ?? null;
@@ -265,7 +274,7 @@ function SshPage() {
           onClose={() => setImporting(null)}
         />
       )}
-      {prompt && <HostKeyDialog prompt={prompt} onDecide={decideHostkey} />}
+      {prompts.length > 0 && <HostKeyDialog prompt={prompts[0]} onDecide={decideHostkey} />}
       {toast && (
         <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-foreground px-3 py-1.5 text-xs text-background shadow-lg">
           {toast}
