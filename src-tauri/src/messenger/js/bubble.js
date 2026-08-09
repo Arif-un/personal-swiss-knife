@@ -79,6 +79,21 @@
     updateBadge();
   };
 
+  // Esc collapses a full window back to the bubble (same path as the title bar's
+  // collapse button). Capture phase so we win before Facebook's own Esc handlers;
+  // no-op while already a bubble.
+  document.addEventListener(
+    "keydown",
+    function (e) {
+      if (e.key === "Escape" && window.__skMode !== "bubble") {
+        e.preventDefault();
+        e.stopPropagation();
+        act("collapse");
+      }
+    },
+    true
+  );
+
   function build() {
     if (!document.body || document.getElementById(ID)) return;
 

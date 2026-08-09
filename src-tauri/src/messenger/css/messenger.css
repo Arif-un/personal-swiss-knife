@@ -145,7 +145,7 @@ html.sk-page-hidden body {
   top: 0;
   left: 0;
   right: 0;
-  height: 6px;
+  height: 23px;
   cursor: move;
   z-index: 2147483646;
   pointer-events: auto;
@@ -161,7 +161,7 @@ html.sk-page-hidden body {
   display: none;
 }
 #__sk_titlebar_drag:hover {
-  height: 22px;
+  height: 30px;
   background: rgba(28, 28, 30, 0.35);
 }
 

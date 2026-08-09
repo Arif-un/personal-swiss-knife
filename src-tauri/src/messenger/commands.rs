@@ -215,6 +215,9 @@ pub fn messenger_open(window: WebviewWindow, app: AppHandle) -> Result<(), Strin
         .inner_size(1000.0, 760.0)
         .decorations(false)
         .transparent(true)
+        // Deliver the first click on the unfocused bubble straight to the webview so a
+        // single click expands (macOS otherwise eats the activating mousedown).
+        .accept_first_mouse(true)
         .user_agent(DESKTOP_UA)
         // CSS first so the stylesheet exists before the overlay JS builds elements.
         .initialization_script(format!(
