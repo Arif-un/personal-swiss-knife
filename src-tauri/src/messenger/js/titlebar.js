@@ -1,6 +1,16 @@
 (function () {
   var ID = "__sk_titlebar";
+  window.__skMode = window.__skMode || "full";
   function act(a) { window.location.href = "swissknife-link://window?action=" + a; }
+  // Hide the control pill + drag strip while collapsed to a bubble.
+  function applyMode() {
+    var bubble = window.__skMode === "bubble";
+    var bar = document.getElementById(ID);
+    var strip = document.getElementById(ID + "_drag");
+    if (bar) bar.style.display = bubble ? "none" : "flex";
+    if (strip) strip.style.display = bubble ? "none" : "block";
+  }
+  window.addEventListener("__sk:mode", applyMode);
   function makeDot(color, glyph, label, action) {
     var b = document.createElement("button");
     b.type = "button";
@@ -37,7 +47,8 @@
     var dots = [
       makeDot("#ff5f57", "×", "Close", "close"),
       makeDot("#febc2e", "–", "Minimize", "minimize"),
-      makeDot("#28c840", "+", "Zoom", "zoom")
+      makeDot("#28c840", "+", "Zoom", "zoom"),
+      makeDot("#0a84ff", "⇲", "Collapse to bubble", "collapse")
     ];
     dots.forEach(function (d) { bar.appendChild(d); });
     bar.addEventListener("mouseenter", function () {
@@ -79,6 +90,7 @@
       grip.style.opacity = "0";
     });
     document.body.appendChild(strip);
+    applyMode();
   }
   build();
   document.addEventListener("DOMContentLoaded", build);

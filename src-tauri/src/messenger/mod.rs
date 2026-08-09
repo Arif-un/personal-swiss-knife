@@ -1,3 +1,4 @@
+pub mod bubble;
 pub mod commands;
 
 /// Window label for the warm, long-lived Messenger webview.

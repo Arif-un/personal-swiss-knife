@@ -33,6 +33,12 @@ const INTERCEPTOR_JS: &str = include_str!("js/interceptor.js");
 /// SPA that can wipe the DOM out from under us on navigation.
 const TITLEBAR_JS: &str = include_str!("js/titlebar.js");
 
+/// Injected into the Messenger webview to draw the floating "chat-head" bubble
+/// overlay used when the window is collapsed. State is pushed from Rust via
+/// `eval` and actions come back through the same `swissknife-link://` scheme.
+/// See `bubble.rs` for the window-morphing logic.
+const BUBBLE_JS: &str = include_str!("js/bubble.js");
+
 /// Whether `raw` parses as an `http`/`https` URL. The click interceptor's own
 /// scheme check runs inside the remote, untrusted Messenger page and is trivially
 /// bypassable (a script can navigate straight to `swissknife-link://...`), so we
@@ -75,6 +81,19 @@ fn open_peek(app: &AppHandle, url: &str) {
 /// `close` hides (keeps the window warm, matching the native close handler in
 /// `lib.rs`); use `messenger_close` to actually reclaim RAM.
 fn window_action(app: &AppHandle, action: &str) {
+    use crate::messenger::bubble;
+
+    // Bubble actions manage the window themselves (resize/destroy/menu), so they
+    // don't need the window fetched up front.
+    match action {
+        "collapse" => return bubble::enter_bubble(app),
+        "expand" => return bubble::expand_click(app),
+        "hide" => return bubble::hide(app),
+        "quit" => return bubble::quit(app),
+        "menu" => return bubble::show_menu(app),
+        _ => {}
+    }
+
     let Some(win) = app.get_webview_window(MESSENGER_LABEL) else {
         return;
     };
@@ -190,10 +209,18 @@ pub fn messenger_open(app: AppHandle) -> Result<(), String> {
         .user_agent(DESKTOP_UA)
         .initialization_script(INTERCEPTOR_JS)
         .initialization_script(TITLEBAR_JS)
+        .initialization_script(BUBBLE_JS)
         .on_navigation(move |url| on_navigation(&handle, url))
         .build()
         .map_err(|e| e.to_string())?;
     round_corners(&win, 12.0);
+
+    // Route native context-menu selections (from the bubble's right-click menu)
+    // back into the bubble module.
+    let menu_handle = app.clone();
+    win.on_menu_event(move |_win, event| {
+        crate::messenger::bubble::on_menu_event(&menu_handle, event.id().as_ref());
+    });
     Ok(())
 }
 

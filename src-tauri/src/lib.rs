@@ -7,15 +7,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ssh::session::SshState::new())
-        // Keep the Messenger window warm: closing it just hides it (instant
-        // reopen, notifications keep flowing). Use `messenger_close` to actually
-        // reclaim its RAM.
+        .manage(messenger::bubble::BubbleState::new())
+        // Messenger window events: keep it warm on close (hide, not destroy) and
+        // snap the floating bubble to a screen edge after a drag. See
+        // `messenger::bubble::on_window_event`.
         .on_window_event(|window, event| {
             if window.label() == messenger::MESSENGER_LABEL {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+                messenger::bubble::on_window_event(window, event);
             }
         })
         .invoke_handler(tauri::generate_handler![
