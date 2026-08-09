@@ -1,6 +1,9 @@
 mod github;
+mod memtrack;
 mod messenger;
 mod ssh;
+
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -8,6 +11,23 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(ssh::session::SshState::new())
         .manage(messenger::bubble::BubbleState::new())
+        // Open the RAM-history store and start the 15-min background sampler. A
+        // failure here (corrupt/locked/unwritable DB) must never abort startup and
+        // take down SSH/GitHub/Messenger, so it degrades to a disabled store and
+        // the /memory page reports no data instead.
+        .setup(|app| {
+            match memtrack::init(app.handle()) {
+                Ok(store) => {
+                    app.manage(store);
+                    memtrack::spawn_sampler(app.handle().clone());
+                }
+                Err(e) => {
+                    eprintln!("memtrack: disabled, init failed: {e}");
+                    app.manage(memtrack::MemStore::disabled());
+                }
+            }
+            Ok(())
+        })
         // Messenger window events: keep it warm on close (hide, not destroy) and
         // snap the floating bubble to a screen edge after a drag. See
         // `messenger::bubble::on_window_event`.
@@ -43,6 +63,9 @@ pub fn run() {
             ssh::commands::forwards_list,
             messenger::commands::messenger_open,
             messenger::commands::messenger_close,
+            memtrack::commands::memory_history,
+            memtrack::commands::memory_latest,
+            memtrack::commands::memory_snapshot_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

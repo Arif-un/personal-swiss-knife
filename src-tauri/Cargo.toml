@@ -28,6 +28,8 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 dirs = "5"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
+sysinfo = "0.33"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

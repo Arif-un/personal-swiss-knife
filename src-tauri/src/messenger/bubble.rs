@@ -50,6 +50,12 @@ const MENU_EXPAND: &str = "sk_bubble_expand";
 const MENU_HIDE: &str = "sk_bubble_hide";
 const MENU_QUIT: &str = "sk_bubble_quit";
 const MENU_MUTE: &str = "sk_bubble_mute";
+const MENU_AUTO: &str = "sk_bubble_auto";
+
+/// Default idle timeout before an unfocused full window auto-collapses to the
+/// bubble. Persisted (and overridable) via `bubble.json`; a value of 0 disables
+/// auto-collapse entirely.
+const DEFAULT_IDLE_SECS: u64 = 60;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Mode {
@@ -72,6 +78,14 @@ pub struct BubbleState {
     /// Remembered bubble position (logical, top-left), persisted to disk.
     pos: Mutex<Option<(f64, f64)>>,
     muted: AtomicBool,
+    /// Whether an unfocused full window auto-collapses to the bubble after the
+    /// idle timeout. Toggleable from the bubble's right-click menu; persisted.
+    auto_collapse: AtomicBool,
+    /// Idle timeout (seconds) before auto-collapse. 0 disables it. Persisted.
+    auto_collapse_secs: AtomicU64,
+    /// Idle-timer generation: bumping it (on refocus or a config change) cancels
+    /// any in-flight auto-collapse countdown.
+    idle: AtomicU64,
     /// Whether the persisted position/mute have been loaded from disk yet.
     loaded: AtomicBool,
     /// Keeps the most recent context menu alive while it is displayed.
@@ -88,6 +102,9 @@ impl BubbleState {
             last_move: Mutex::new(None),
             pos: Mutex::new(None),
             muted: AtomicBool::new(false),
+            auto_collapse: AtomicBool::new(true),
+            auto_collapse_secs: AtomicU64::new(DEFAULT_IDLE_SECS),
+            idle: AtomicU64::new(0),
             loaded: AtomicBool::new(false),
             menu: Mutex::new(None),
         }
@@ -217,7 +234,7 @@ pub fn enter_bubble(app: &AppHandle) {
     let Some(win) = app.get_webview_window(MESSENGER_LABEL) else {
         return;
     };
-    ensure_loaded(app, &win);
+    ensure_loaded(app);
     *app.state::<BubbleState>().mode.lock().unwrap() = Mode::Bubble;
 
     let _ = win.set_always_on_top(true);
@@ -341,6 +358,16 @@ fn toggle_mute(app: &AppHandle) {
     persist(app);
 }
 
+fn toggle_auto_collapse(app: &AppHandle) {
+    let st = app.state::<BubbleState>();
+    let now = !st.auto_collapse.load(Ordering::SeqCst);
+    st.auto_collapse.store(now, Ordering::SeqCst);
+    // Cancel any pending countdown when disabling; it re-arms on the next blur
+    // once re-enabled.
+    st.idle.fetch_add(1, Ordering::SeqCst);
+    persist(app);
+}
+
 /// Build and pop up the native right-click menu (kept native because the bubble
 /// window is far too small to host an HTML menu).
 pub fn show_menu(app: &AppHandle) {
@@ -364,7 +391,13 @@ pub fn show_menu(app: &AppHandle) {
     else {
         return;
     };
-    let Ok(menu) = Menu::with_items(app, &[&expand, &hide_it, &quit_it, &mute_it]) else {
+    let auto = app.state::<BubbleState>().auto_collapse.load(Ordering::SeqCst);
+    let Ok(auto_it) =
+        CheckMenuItem::with_id(app, MENU_AUTO, "Auto-collapse", true, auto, None::<&str>)
+    else {
+        return;
+    };
+    let Ok(menu) = Menu::with_items(app, &[&expand, &hide_it, &quit_it, &mute_it, &auto_it]) else {
         return;
     };
     let _ = win.popup_menu(&menu);
@@ -379,6 +412,7 @@ pub fn on_menu_event(app: &AppHandle, id: &str) {
         MENU_HIDE => hide(app),
         MENU_QUIT => quit(app),
         MENU_MUTE => toggle_mute(app),
+        MENU_AUTO => toggle_auto_collapse(app),
         _ => {}
     }
 }
@@ -419,8 +453,99 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
                 }
             });
         }
+        // Auto-collapse: while the full window is unfocused for the idle timeout
+        // it collapses into the bubble. Regaining focus cancels the countdown.
+        WindowEvent::Focused(focused) => {
+            let app = window.app_handle().clone();
+            if *focused {
+                // Cancel any pending countdown; a fresh one arms on the next blur.
+                app.state::<BubbleState>()
+                    .idle
+                    .fetch_add(1, Ordering::SeqCst);
+            } else {
+                schedule_idle_collapse(&app);
+            }
+        }
         _ => {}
     }
+}
+
+/// Arm the auto-collapse countdown after the full window loses focus. No-op
+/// unless we're in full mode with auto-collapse enabled and a non-zero timeout.
+/// A newer arm (or a refocus) bumps `idle`, so this thread bails on wake.
+fn schedule_idle_collapse(app: &AppHandle) {
+    let secs = {
+        let st = app.state::<BubbleState>();
+        if *st.mode.lock().unwrap() != Mode::Full {
+            return;
+        }
+        if !st.auto_collapse.load(Ordering::SeqCst) {
+            return;
+        }
+        st.auto_collapse_secs.load(Ordering::SeqCst)
+    };
+    if secs == 0 {
+        return;
+    }
+    let generation = app
+        .state::<BubbleState>()
+        .idle
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+    let app = app.clone();
+    // A cheap async timer, not an OS thread: rapid focus toggling can arm many
+    // countdowns, and detached threads (each with a reserved stack) sleeping the
+    // full timeout would accumulate. Stale arms are cancelled by the generation
+    // check below.
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+        {
+            let st = app.state::<BubbleState>();
+            if st.idle.load(Ordering::SeqCst) != generation {
+                return; // refocused or superseded by a newer arm
+            }
+            if *st.mode.lock().unwrap() != Mode::Full {
+                return; // already collapsed some other way
+            }
+        }
+        // Window ops (eval / always-on-top / shadow) must run on the main thread
+        // on macOS, so hop back before collapsing. Re-check state there too.
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            {
+                let st = app2.state::<BubbleState>();
+                if st.idle.load(Ordering::SeqCst) != generation {
+                    return;
+                }
+                if *st.mode.lock().unwrap() != Mode::Full {
+                    return;
+                }
+            }
+            let Some(win) = app2.get_webview_window(MESSENGER_LABEL) else {
+                return;
+            };
+            // Only a visible, still-unfocused window collapses: don't pop a
+            // bubble the user didn't ask for out of a hidden/minimized window.
+            if !matches!(win.is_visible(), Ok(true)) {
+                return;
+            }
+            if matches!(win.is_minimized(), Ok(true)) {
+                return;
+            }
+            if matches!(win.is_focused(), Ok(true)) {
+                return;
+            }
+            enter_bubble(&app2);
+        });
+    });
+}
+
+/// Arm the idle countdown when the full window is first opened, so a launch the
+/// user never interacts with still collapses. Refocusing (or the window being
+/// focused on open) cancels it via the `Focused` event / the fire-time check.
+pub fn on_opened(app: &AppHandle) {
+    ensure_loaded(app);
+    schedule_idle_collapse(app);
 }
 
 /// Snap the bubble to the nearest left/right edge, keeping its vertical spot.
@@ -463,8 +588,8 @@ fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
         .map(|d| d.join("bubble.json"))
 }
 
-/// Load persisted position + mute state once per run.
-fn ensure_loaded(app: &AppHandle, _win: &WebviewWindow) {
+/// Load persisted position + mute + auto-collapse settings once per run.
+fn ensure_loaded(app: &AppHandle) {
     let st = app.state::<BubbleState>();
     if st.loaded.swap(true, Ordering::SeqCst) {
         return;
@@ -486,6 +611,12 @@ fn ensure_loaded(app: &AppHandle, _win: &WebviewWindow) {
     }
     if let Some(m) = v.get("muted").and_then(|m| m.as_bool()) {
         st.muted.store(m, Ordering::SeqCst);
+    }
+    if let Some(a) = v.get("auto_collapse").and_then(|a| a.as_bool()) {
+        st.auto_collapse.store(a, Ordering::SeqCst);
+    }
+    if let Some(s) = v.get("auto_collapse_secs").and_then(|s| s.as_u64()) {
+        st.auto_collapse_secs.store(s, Ordering::SeqCst);
     }
 }
 
@@ -518,9 +649,16 @@ fn persist(app: &AppHandle) {
     let st = app.state::<BubbleState>();
     let pos = *st.pos.lock().unwrap();
     let muted = st.muted.load(Ordering::SeqCst);
+    let auto = st.auto_collapse.load(Ordering::SeqCst);
+    let secs = st.auto_collapse_secs.load(Ordering::SeqCst);
     let (x, y) = pos.unwrap_or((0.0, 0.0));
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(&path, format!("{{\"x\":{x},\"y\":{y},\"muted\":{muted}}}"));
+    let _ = std::fs::write(
+        &path,
+        format!(
+            "{{\"x\":{x},\"y\":{y},\"muted\":{muted},\"auto_collapse\":{auto},\"auto_collapse_secs\":{secs}}}"
+        ),
+    );
 }

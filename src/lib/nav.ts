@@ -1,4 +1,5 @@
 import {
+  ActivityIcon,
   GitPullRequestIcon,
   HomeIcon,
   MessageCircleIcon,
@@ -35,5 +36,11 @@ export const navItems: NavItem[] = [
     path: "/messenger",
     icon: MessageCircleIcon,
     description: "Chat on Messenger in a light native window instead of a browser tab.",
+  },
+  {
+    title: "Memory",
+    path: "/memory",
+    icon: ActivityIcon,
+    description: "Track RAM usage of the app and its processes, snapshotted every 15 min.",
   },
 ];

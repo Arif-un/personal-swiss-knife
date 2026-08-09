@@ -2,12 +2,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { rootRoute } from "./routes/__root.tsx";
 import { indexRoute } from "./routes/index.tsx";
+import { memoryRoute } from "./routes/memory.tsx";
 import { messengerRoute } from "./routes/messenger.tsx";
 import { pullRequestsRoute } from "./routes/pull-requests.tsx";
 import { sshRoute } from "./routes/ssh.tsx";
 import "./App.css";
 
-const routeTree = rootRoute.addChildren([indexRoute, pullRequestsRoute, sshRoute, messengerRoute]);
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  pullRequestsRoute,
+  sshRoute,
+  messengerRoute,
+  memoryRoute,
+]);
 
 const router = createRouter({ routeTree });
 

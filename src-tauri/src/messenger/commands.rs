@@ -195,6 +195,7 @@ pub fn messenger_open(app: AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
         win.show().map_err(|e| e.to_string())?;
         win.set_focus().map_err(|e| e.to_string())?;
+        crate::messenger::bubble::on_opened(&app);
         return Ok(());
     }
     let url: Url = MESSENGER_URL
@@ -221,6 +222,7 @@ pub fn messenger_open(app: AppHandle) -> Result<(), String> {
     win.on_menu_event(move |_win, event| {
         crate::messenger::bubble::on_menu_event(&menu_handle, event.id().as_ref());
     });
+    crate::messenger::bubble::on_opened(&app);
     Ok(())
 }
 
