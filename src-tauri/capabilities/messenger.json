@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "messenger",
+  "description": "Floating title bar for the Messenger window. Grants only window dragging to the remote Messenger content so the custom, decorationless title bar can be dragged.",
+  "windows": ["messenger"],
+  "remote": {
+    "urls": [
+      "https://*.facebook.com",
+      "https://facebook.com",
+      "https://*.messenger.com"
+    ]
+  },
+  "permissions": ["core:window:allow-start-dragging"]
+}

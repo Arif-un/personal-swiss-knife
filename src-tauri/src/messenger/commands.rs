@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::messenger::{MESSENGER_LABEL, MESSENGER_URL, PEEK_LABEL, ROUTE_SCHEME};
@@ -16,44 +16,22 @@ const DESKTOP_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleW
 ///
 /// Shift-click routes to the system browser; a plain click routes to the reusable
 /// preview ("peek") window.
-const INTERCEPTOR_JS: &str = r#"
-(function () {
-  var INTERNAL = /(^|\.)facebook\.com$|(^|\.)fbcdn\.net$|(^|\.)messenger\.com$|(^|\.)fb\.com$/;
-  function unwrap(raw) {
-    try {
-      var u = new URL(raw, location.href);
-      if (u.hostname === "l.facebook.com" || u.hostname === "lm.facebook.com") {
-        var t = u.searchParams.get("u");
-        if (t) return t;
-      }
-      return u.href;
-    } catch (e) {
-      return raw;
-    }
-  }
-  function isInternal(raw) {
-    try { return INTERNAL.test(new URL(raw, location.href).hostname); }
-    catch (e) { return true; }
-  }
-  // Returns true if the link was captured (caller should cancel the default).
-  function route(raw, toBrowser) {
-    var target = unwrap(raw);
-    if (isInternal(target)) return false;
-    var mode = toBrowser ? "browser" : "peek";
-    location.href = "swissknife-link://route?mode=" + mode + "&url=" + encodeURIComponent(target);
-    return true;
-  }
-  document.addEventListener("click", function (e) {
-    if (e.defaultPrevented || e.button !== 0) return;
-    var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
-    if (!a) return;
-    if (route(a.href, e.shiftKey)) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  }, true);
-})();
-"#;
+const INTERCEPTOR_JS: &str = include_str!("js/interceptor.js");
+
+/// Injected into the Messenger webview to draw a floating, macOS-style window
+/// control pill (close / minimize / zoom) in the top-left corner. The window is
+/// built with `decorations(false)`, so it has no native title bar or traffic
+/// lights — this replaces them.
+///
+/// Button clicks signal Rust through the same `swissknife-link://` scheme the
+/// link interceptor uses (host `window`, `action` query), so the remote page
+/// still gets no IPC/ACL access to real commands. Dragging the pill's empty area
+/// uses `data-tauri-drag-region`, which needs `core:window:allow-start-dragging`
+/// granted to this window (see `capabilities/messenger.json`).
+///
+/// The pill and drag strip are re-added on an interval because Facebook is an
+/// SPA that can wipe the DOM out from under us on navigation.
+const TITLEBAR_JS: &str = include_str!("js/titlebar.js");
 
 /// Whether `raw` parses as an `http`/`https` URL. The click interceptor's own
 /// scheme check runs inside the remote, untrusted Messenger page and is trivially
@@ -93,6 +71,31 @@ fn open_peek(app: &AppHandle, url: &str) {
         .build();
 }
 
+/// Apply a window control action signalled by the injected floating title bar.
+/// `close` hides (keeps the window warm, matching the native close handler in
+/// `lib.rs`); use `messenger_close` to actually reclaim RAM.
+fn window_action(app: &AppHandle, action: &str) {
+    let Some(win) = app.get_webview_window(MESSENGER_LABEL) else {
+        return;
+    };
+    match action {
+        "close" => {
+            let _ = win.hide();
+        }
+        "minimize" => {
+            let _ = win.minimize();
+        }
+        "zoom" => {
+            if matches!(win.is_maximized(), Ok(true)) {
+                let _ = win.unmaximize();
+            } else {
+                let _ = win.maximize();
+            }
+        }
+        _ => {}
+    }
+}
+
 /// `on_navigation` handler for the Messenger window. Returns `true` to let the
 /// navigation proceed inside the webview, `false` to cancel it.
 ///
@@ -105,6 +108,17 @@ fn open_peek(app: &AppHandle, url: &str) {
 fn on_navigation(app: &AppHandle, url: &Url) -> bool {
     if url.scheme() != ROUTE_SCHEME {
         return true;
+    }
+
+    // Floating title bar control (close / minimize / zoom): apply, then cancel.
+    if url.host_str() == Some("window") {
+        let action = url
+            .query_pairs()
+            .find(|(k, _)| k == "action")
+            .map(|(_, v)| v.into_owned())
+            .unwrap_or_default();
+        window_action(app, &action);
+        return false;
     }
 
     // Intent signalled by the injected interceptor: route, then cancel so the
@@ -128,6 +142,32 @@ fn on_navigation(app: &AppHandle, url: &Url) -> bool {
     false
 }
 
+/// Round the corners of a decorationless, transparent macOS window. CSS
+/// `border-radius` can't do this reliably here: the Messenger page uses
+/// `position:fixed` full-viewport layers that escape any ancestor's overflow
+/// clip and repaint square corners. Masking the native content view's layer
+/// clips the whole webview at the compositing level, immune to page CSS.
+#[cfg(target_os = "macos")]
+fn round_corners(win: &WebviewWindow, radius: f64) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let Ok(ns_window) = win.ns_window() else {
+        return;
+    };
+    let ns_window = ns_window as *mut AnyObject;
+    unsafe {
+        let content_view: *mut AnyObject = msg_send![ns_window, contentView];
+        let _: () = msg_send![content_view, setWantsLayer: true];
+        let layer: *mut AnyObject = msg_send![content_view, layer];
+        let _: () = msg_send![layer, setCornerRadius: radius];
+        let _: () = msg_send![layer, setMasksToBounds: true];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn round_corners(_win: &WebviewWindow, _radius: f64) {}
+
 /// Open the Messenger window, or show + focus it if it already exists. The window
 /// is created lazily on first use and, thanks to the close handler in `lib.rs`,
 /// is hidden (not destroyed) on close so reopening is instant.
@@ -142,14 +182,18 @@ pub fn messenger_open(app: AppHandle) -> Result<(), String> {
         .parse()
         .map_err(|_| "invalid messenger url".to_string())?;
     let handle = app.clone();
-    WebviewWindowBuilder::new(&app, MESSENGER_LABEL, WebviewUrl::External(url))
+    let win = WebviewWindowBuilder::new(&app, MESSENGER_LABEL, WebviewUrl::External(url))
         .title("Messenger")
         .inner_size(1000.0, 760.0)
+        .decorations(false)
+        .transparent(true)
         .user_agent(DESKTOP_UA)
         .initialization_script(INTERCEPTOR_JS)
+        .initialization_script(TITLEBAR_JS)
         .on_navigation(move |url| on_navigation(&handle, url))
         .build()
         .map_err(|e| e.to_string())?;
+    round_corners(&win, 12.0);
     Ok(())
 }
 

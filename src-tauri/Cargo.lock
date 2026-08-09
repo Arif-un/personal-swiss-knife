@@ -3184,6 +3184,7 @@ version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
  "keyring",
+ "objc2",
  "russh",
  "serde",
  "serde_json",
