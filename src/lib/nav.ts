@@ -4,6 +4,7 @@ import {
   HomeIcon,
   MessageCircleIcon,
   TerminalIcon,
+  WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -42,5 +43,11 @@ export const navItems: NavItem[] = [
     path: "/memory",
     icon: ActivityIcon,
     description: "Track RAM usage of the app and its processes, snapshotted every 15 min.",
+  },
+  {
+    title: "Utils",
+    path: "/utils",
+    icon: WrenchIcon,
+    description: "System toggles like enabling or disabling Cisco Umbrella.",
   },
 ];

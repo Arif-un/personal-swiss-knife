@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 /// A saved pull-request "view": a named repo + filter preset.
 /// `filters` is stored opaquely as JSON so the backend never needs to track
@@ -53,7 +53,8 @@ fn save(path: &Path, store: &PrViewsStore) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn pr_views_list(app: AppHandle) -> Result<PrViewsStore, String> {
+pub fn pr_views_list(window: WebviewWindow, app: AppHandle) -> Result<PrViewsStore, String> {
+    crate::security::require_main(&window)?;
     load(&store_path(&app)?)
 }
 
@@ -61,7 +62,12 @@ pub fn pr_views_list(app: AppHandle) -> Result<PrViewsStore, String> {
 /// that view (used for rename and update-to-current-filters). Returns the saved
 /// view (with its assigned id).
 #[tauri::command]
-pub fn pr_views_save(app: AppHandle, mut view: PrView) -> Result<PrView, String> {
+pub fn pr_views_save(
+    window: WebviewWindow,
+    app: AppHandle,
+    mut view: PrView,
+) -> Result<PrView, String> {
+    crate::security::require_main(&window)?;
     let path = store_path(&app)?;
     let mut store = load(&path)?;
     if view.id.is_empty() {
@@ -76,7 +82,8 @@ pub fn pr_views_save(app: AppHandle, mut view: PrView) -> Result<PrView, String>
 }
 
 #[tauri::command]
-pub fn pr_views_delete(app: AppHandle, id: String) -> Result<(), String> {
+pub fn pr_views_delete(window: WebviewWindow, app: AppHandle, id: String) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     let path = store_path(&app)?;
     let mut store = load(&path)?;
     store.views.retain(|v| v.id != id);
@@ -87,7 +94,12 @@ pub fn pr_views_delete(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn pr_views_set_active(app: AppHandle, id: Option<String>) -> Result<(), String> {
+pub fn pr_views_set_active(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: Option<String>,
+) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     let path = store_path(&app)?;
     let mut store = load(&path)?;
     store.active_view_id = id.filter(|s| !s.is_empty());

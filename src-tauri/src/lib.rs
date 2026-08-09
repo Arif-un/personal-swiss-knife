@@ -1,7 +1,9 @@
 mod github;
 mod memtrack;
 mod messenger;
+mod security;
 mod ssh;
+mod utils;
 
 use tauri::Manager;
 
@@ -66,6 +68,8 @@ pub fn run() {
             memtrack::commands::memory_history,
             memtrack::commands::memory_latest,
             memtrack::commands::memory_snapshot_now,
+            utils::commands::cisco_status,
+            utils::commands::cisco_set_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

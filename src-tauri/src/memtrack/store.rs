@@ -44,7 +44,9 @@ pub fn insert(conn: &Connection, snap: &Snapshot) -> Result<(), String> {
 
     {
         let mut stmt = tx
-            .prepare("INSERT INTO proc_samples (snapshot_id, pid, name, rss) VALUES (?1, ?2, ?3, ?4)")
+            .prepare(
+                "INSERT INTO proc_samples (snapshot_id, pid, name, rss) VALUES (?1, ?2, ?3, ?4)",
+            )
             .map_err(|e| e.to_string())?;
         for p in &snap.processes {
             stmt.execute(params![id, p.pid, p.name, p.rss_bytes])

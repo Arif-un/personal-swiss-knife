@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 use crate::ssh::session::{SessionCmd, SshState};
 use crate::ssh::{config, keychain, session, ForwardSpec, Host, HostSource, DEFAULT_SSH_PORT};
@@ -66,12 +66,14 @@ fn validate_host(host: &Host) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn hosts_list(app: AppHandle) -> Result<Vec<Host>, String> {
+pub fn hosts_list(window: WebviewWindow, app: AppHandle) -> Result<Vec<Host>, String> {
+    crate::security::require_main(&window)?;
     all_hosts(&app)
 }
 
 #[tauri::command]
-pub fn host_save(app: AppHandle, host: Host) -> Result<String, String> {
+pub fn host_save(window: WebviewWindow, app: AppHandle, host: Host) -> Result<String, String> {
+    crate::security::require_main(&window)?;
     validate_host(&host)?;
     if host.source == HostSource::SshConfig {
         config::write_host_block(&host)?;
@@ -83,7 +85,8 @@ pub fn host_save(app: AppHandle, host: Host) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn host_delete(app: AppHandle, host: Host) -> Result<(), String> {
+pub fn host_delete(window: WebviewWindow, app: AppHandle, host: Host) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     if host.source == HostSource::SshConfig {
         Ok(config::delete_host_block(&host.alias)?)
     } else {
@@ -93,7 +96,11 @@ pub fn host_delete(app: AppHandle, host: Host) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn discover_history_hosts(app: AppHandle) -> Result<Vec<Host>, String> {
+pub fn discover_history_hosts(
+    window: WebviewWindow,
+    app: AppHandle,
+) -> Result<Vec<Host>, String> {
+    crate::security::require_main(&window)?;
     let existing = all_hosts(&app)?;
     let mut found = crate::ssh::discover::discover_hosts();
     found.retain(|h| {
@@ -105,7 +112,12 @@ pub fn discover_history_hosts(app: AppHandle) -> Result<Vec<Host>, String> {
 }
 
 #[tauri::command]
-pub fn ssh_build_command(app: AppHandle, host_id: String) -> Result<String, String> {
+pub fn ssh_build_command(
+    window: WebviewWindow,
+    app: AppHandle,
+    host_id: String,
+) -> Result<String, String> {
+    crate::security::require_main(&window)?;
     let host = all_hosts(&app)?
         .into_iter()
         .find(|h| h.id == host_id)
@@ -114,18 +126,25 @@ pub fn ssh_build_command(app: AppHandle, host_id: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-pub fn ssh_set_passphrase(key_path: String, secret: String) -> Result<(), String> {
+pub fn ssh_set_passphrase(
+    window: WebviewWindow,
+    key_path: String,
+    secret: String,
+) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     Ok(keychain::set_passphrase(&key_path, &secret)?)
 }
 
 #[tauri::command]
 pub async fn ssh_connect(
+    window: WebviewWindow,
     app: AppHandle,
     state: State<'_, SshState>,
     host_id: String,
     cols: u32,
     rows: u32,
 ) -> Result<String, String> {
+    crate::security::require_main(&window)?;
     let all = all_hosts(&app)?;
     let host = all
         .iter()
@@ -137,10 +156,12 @@ pub async fn ssh_connect(
 
 #[tauri::command]
 pub async fn ssh_trust_hostkey(
+    window: WebviewWindow,
     state: State<'_, SshState>,
     prompt_id: String,
     trust: bool,
 ) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     if let Some(tx) = state.hostkey_prompts.lock().await.remove(&prompt_id) {
         let _ = tx.send(trust);
     }
@@ -149,10 +170,12 @@ pub async fn ssh_trust_hostkey(
 
 #[tauri::command]
 pub async fn ssh_write(
+    window: WebviewWindow,
     state: State<'_, SshState>,
     session_id: String,
     data: String,
 ) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     let sessions = state.sessions.lock().await;
     if let Some(entry) = sessions.get(&session_id) {
         entry
@@ -165,11 +188,13 @@ pub async fn ssh_write(
 
 #[tauri::command]
 pub async fn ssh_resize(
+    window: WebviewWindow,
     state: State<'_, SshState>,
     session_id: String,
     cols: u32,
     rows: u32,
 ) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     let sessions = state.sessions.lock().await;
     if let Some(entry) = sessions.get(&session_id) {
         let _ = entry.tx.send(SessionCmd::Resize(cols, rows));
@@ -178,17 +203,24 @@ pub async fn ssh_resize(
 }
 
 #[tauri::command]
-pub async fn ssh_disconnect(state: State<'_, SshState>, session_id: String) -> Result<(), String> {
+pub async fn ssh_disconnect(
+    window: WebviewWindow,
+    state: State<'_, SshState>,
+    session_id: String,
+) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     session::disconnect(state.inner(), &session_id).await;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn forward_start(
+    window: WebviewWindow,
     state: State<'_, SshState>,
     session_id: String,
     spec: ForwardSpec,
 ) -> Result<String, String> {
+    crate::security::require_main(&window)?;
     let handle = {
         let sessions = state.sessions.lock().await;
         sessions
@@ -214,10 +246,12 @@ pub async fn forward_start(
 
 #[tauri::command]
 pub async fn forward_stop(
+    window: WebviewWindow,
     state: State<'_, SshState>,
     session_id: String,
     forward_id: String,
 ) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     let mut sessions = state.sessions.lock().await;
     if let Some(entry) = sessions.get_mut(&session_id) {
         if let Some(fh) = entry.forwards.remove(&forward_id) {
@@ -236,9 +270,11 @@ pub struct ForwardInfo {
 
 #[tauri::command]
 pub async fn forwards_list(
+    window: WebviewWindow,
     state: State<'_, SshState>,
     session_id: String,
 ) -> Result<Vec<ForwardInfo>, String> {
+    crate::security::require_main(&window)?;
     let sessions = state.sessions.lock().await;
     let list = sessions
         .get(&session_id)

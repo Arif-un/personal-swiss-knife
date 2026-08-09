@@ -31,9 +31,11 @@ where
 
 #[tauri::command]
 pub async fn fetch_pull_requests(
+    window: tauri::WebviewWindow,
     repo: String,
     filters: Option<PrFilters>,
 ) -> Result<Vec<PullRequest>, String> {
+    crate::security::require_main(&window)?;
     // The `gh` call blocks on subprocess + network I/O; run it off the main
     // thread so it never stalls the UI event loop.
     run_blocking(move || {
@@ -126,7 +128,12 @@ fn edit_pr_label(repo: &str, number: u64, flag: &str, label: &str) -> GithubResu
 /// Add the CI label to a PR. If it is already present, remove it first and
 /// re-add it (forces a fresh label event). Returns the PR's labels afterwards.
 #[tauri::command]
-pub async fn readd_ci_label(repo: String, number: u64) -> Result<Vec<String>, String> {
+pub async fn readd_ci_label(
+    window: tauri::WebviewWindow,
+    repo: String,
+    number: u64,
+) -> Result<Vec<String>, String> {
+    crate::security::require_main(&window)?;
     run_blocking(move || {
         let labels = fetch_pr_labels(&repo, number)?;
         if labels.iter().any(|l| l.eq_ignore_ascii_case(CI_LABEL)) {
@@ -142,9 +149,11 @@ pub async fn readd_ci_label(repo: String, number: u64) -> Result<Vec<String>, St
 /// Only the most recent `GRAPHQL_PAGE` label events per PR are inspected.
 #[tauri::command]
 pub async fn fetch_ci_label_counts(
+    window: tauri::WebviewWindow,
     repo: String,
     numbers: Vec<u64>,
 ) -> Result<HashMap<u64, u64>, String> {
+    crate::security::require_main(&window)?;
     run_blocking(move || {
         let selection = format!(
             "timelineItems(itemTypes: [LABELED_EVENT], last: {GRAPHQL_PAGE}) {{ \
@@ -179,9 +188,11 @@ pub async fn fetch_ci_label_counts(
 /// Only the most recent `GRAPHQL_PAGE` review threads per PR are inspected.
 #[tauri::command]
 pub async fn fetch_unresolved_comment_counts(
+    window: tauri::WebviewWindow,
     repo: String,
     numbers: Vec<u64>,
 ) -> Result<HashMap<u64, u64>, String> {
+    crate::security::require_main(&window)?;
     run_blocking(move || {
         let selection = format!("reviewThreads(last: {GRAPHQL_PAGE}) {{ nodes {{ isResolved }} }}");
         Ok(gh::batched_pr_graphql(
@@ -206,9 +217,11 @@ pub async fn fetch_unresolved_comment_counts(
 /// Report whether each PR is currently sitting in the repo's merge queue.
 #[tauri::command]
 pub async fn fetch_merge_queue_status(
+    window: tauri::WebviewWindow,
     repo: String,
     numbers: Vec<u64>,
 ) -> Result<HashMap<u64, bool>, String> {
+    crate::security::require_main(&window)?;
     run_blocking(move || {
         Ok(gh::batched_pr_graphql(
             &repo,
@@ -225,7 +238,12 @@ pub async fn fetch_merge_queue_status(
 /// regardless of exit status; only a genuine failure (no JSON and not a "no
 /// checks" case) surfaces an error.
 #[tauri::command]
-pub async fn fetch_pr_checks(repo: String, number: u64) -> Result<Vec<PrCheck>, String> {
+pub async fn fetch_pr_checks(
+    window: tauri::WebviewWindow,
+    repo: String,
+    number: u64,
+) -> Result<Vec<PrCheck>, String> {
+    crate::security::require_main(&window)?;
     run_blocking(move || {
         let output = gh::run_gh_capture([
             "pr",

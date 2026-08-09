@@ -1,0 +1,183 @@
+/* Styles for the Messenger webview overlays. Injected once by inject-style.js
+   from the window.__SK_CSS global (set by Rust in commands.rs). The overlay JS
+   (bubble.js, titlebar.js) only toggles the state classes defined here. */
+
+/* Bubble overlay (bubble.js) */
+#__sk_bubble {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+  pointer-events: none; /* flows to children only; transparent area stays inert */
+  background: transparent;
+  visibility: visible; /* stay painted even when the page is hidden */
+  -webkit-user-select: none;
+  user-select: none;
+}
+#__sk_bubble.sk-mounted {
+  display: flex;
+} /* toggled before the fade in */
+#__sk_bubble.sk-visible {
+  opacity: 1;
+} /* toggled on the next frame */
+
+#__sk_bubble .sk-circle {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 32% 26%, #00c6ff 0%, #0078ff 55%, #a033ff 100%);
+  /* box-shadow: 0 4px 14px rgba(0, 0, 0, 0.38); */
+  cursor: pointer;
+  pointer-events: auto;
+}
+/* The bolt glyph inside the SVG should not swallow drag/clicks. */
+#__sk_bubble .sk-circle svg {
+  pointer-events: none;
+}
+
+#__sk_bubble_badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #ff3b30;
+  color: #fff;
+  font:
+    700 11px/18px -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
+  text-align: center;
+  box-sizing: border-box;
+  display: none;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.28);
+}
+#__sk_bubble_badge.sk-on {
+  display: block;
+}
+
+/* Page hide while collapsed to a bubble (was setPageHidden inline styles).
+   !important so Facebook's own html/body styles can't win; #__sk_bubble keeps
+   its own visibility:visible so the overlay still paints over the hidden page. */
+html.sk-page-hidden {
+  visibility: hidden !important;
+  overflow: hidden !important;
+}
+html.sk-page-hidden body {
+  overflow: hidden !important;
+}
+
+/* Titlebar control pill (titlebar.js) */
+#__sk_titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+  padding: 0 10px;
+  border-radius: 11px;
+  background: rgba(28, 28, 30, 0.55);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: auto;
+}
+#__sk_titlebar.sk-hidden {
+  display: none;
+}
+
+#__sk_titlebar .sk-dot {
+  all: unset;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+#__sk_titlebar .sk-dot-close {
+  background: #ff5f57;
+}
+#__sk_titlebar .sk-dot-minimize {
+  background: #febc2e;
+}
+#__sk_titlebar .sk-dot-zoom {
+  background: #28c840;
+}
+#__sk_titlebar .sk-dot-collapse {
+  background: #0a84ff;
+}
+/* Glyph revealed on pill hover (was JS textContent toggling). */
+#__sk_titlebar:hover .sk-dot::after {
+  content: attr(data-glyph);
+}
+
+/* Slim, full-width drag strip along the top edge. Thin at rest so it barely
+   covers the page; grows + shows a grip on hover to invite dragging. Sits just
+   below the control pill so the pill's buttons stay clickable. */
+#__sk_titlebar_drag {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: move;
+  z-index: 2147483646;
+  pointer-events: auto;
+  background: transparent;
+  backdrop-filter: blur(3px);
+  -webkit-user-select: none;
+  user-select: none;
+  transition:
+    height 0.15s ease,
+    background 0.15s ease;
+}
+#__sk_titlebar_drag.sk-hidden {
+  display: none;
+}
+#__sk_titlebar_drag:hover {
+  height: 22px;
+  background: rgba(28, 28, 30, 0.35);
+}
+
+#__sk_titlebar_drag .sk-grip {
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 46px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.4);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+#__sk_titlebar_drag:hover .sk-grip {
+  opacity: 1;
+}

@@ -25,19 +25,14 @@
     window.location.href = "swissknife-link://window?action=" + a;
   }
 
-  // Hide/show the Facebook page's paint. The overlay forces itself visible, so
-  // hiding <html> leaves only the bubble drawn (no page ring around the circle).
-  // The page keeps running while hidden, so the unread count stays live.
-  // `overflow:hidden` also kills the scrollbars the huge page would otherwise
-  // draw inside the tiny 76px bubble window.
+  // Hide/show the Facebook page's paint via the `sk-page-hidden` class (rules in
+  // messenger.css). The overlay forces itself visible, so hiding <html> leaves
+  // only the bubble drawn (no page ring around the circle). The page keeps
+  // running while hidden, so the unread count stays live. The CSS also kills the
+  // scrollbars the huge page would otherwise draw inside the tiny bubble window.
   function setPageHidden(hidden) {
     var de = document.documentElement;
-    var body = document.body;
-    if (de) {
-      de.style.visibility = hidden ? "hidden" : "";
-      de.style.overflow = hidden ? "hidden" : "";
-    }
-    if (body) body.style.overflow = hidden ? "hidden" : "";
+    if (de) de.classList.toggle("sk-page-hidden", hidden);
   }
 
   function apply(mode) {
@@ -45,17 +40,17 @@
     if (!root) return;
     if (mode === "bubble") {
       setPageHidden(true);
-      root.style.display = "flex";
+      root.classList.add("sk-mounted");
       // Next frame so the opacity transition runs.
       requestAnimationFrame(function () {
-        root.style.opacity = "1";
+        root.classList.add("sk-visible");
       });
       updateBadge();
     } else {
       setPageHidden(false);
-      root.style.opacity = "0";
+      root.classList.remove("sk-visible");
       setTimeout(function () {
-        if (window.__skMode !== "bubble") root.style.display = "none";
+        if (window.__skMode !== "bubble") root.classList.remove("sk-mounted");
       }, 180);
     }
   }
@@ -67,10 +62,10 @@
     var m = /^\((\d+)\)/.exec(document.title || "");
     if (m) n = parseInt(m[1], 10) || 0;
     if (window.__skMuted || n <= 0) {
-      badge.style.display = "none";
+      badge.classList.remove("sk-on");
     } else {
       badge.textContent = n > 99 ? "99+" : String(n);
-      badge.style.display = "block";
+      badge.classList.add("sk-on");
     }
   }
 
@@ -89,41 +84,16 @@
 
     var root = document.createElement("div");
     root.id = ID;
-    // pointer-events flow to children only; the transparent area stays inert.
-    root.style.cssText = [
-      "position:fixed", "inset:0", "z-index:2147483646",
-      "display:none", "align-items:center", "justify-content:center",
-      "opacity:0", "transition:opacity .16s ease",
-      "pointer-events:none", "background:transparent", "visibility:visible",
-      "-webkit-user-select:none", "user-select:none"
-    ].join(";");
 
     var circle = document.createElement("div");
+    circle.className = "sk-circle";
     circle.setAttribute("data-tauri-drag-region", "");
     circle.setAttribute("aria-label", "Messenger");
-    circle.style.cssText = [
-      "position:relative", "width:40px", "height:40px", "border-radius:50%",
-      "display:flex", "align-items:center", "justify-content:center",
-      "background:radial-gradient(circle at 32% 26%,#00c6ff 0%,#0078ff 55%,#a033ff 100%)",
-      "box-shadow:0 4px 14px rgba(0,0,0,0.38)", "cursor:pointer",
-      "pointer-events:auto"
-    ].join(";");
     circle.innerHTML = LOGO;
 
     var badge = document.createElement("div");
     badge.id = ID + "_badge";
-    badge.style.cssText = [
-      "position:absolute", "top:-3px", "right:-3px", "min-width:18px", "height:18px",
-      "padding:0 5px", "border-radius:9px", "background:#ff3b30", "color:#fff",
-      "font:700 11px/18px -apple-system,BlinkMacSystemFont,system-ui,sans-serif",
-      "text-align:center", "box-sizing:border-box", "display:none", "pointer-events:none",
-      "box-shadow:0 0 0 2px rgba(0,0,0,0.28)"
-    ].join(";");
     circle.appendChild(badge);
-
-    // The bolt glyph inside the SVG should not swallow drag/clicks.
-    var svg = circle.querySelector("svg");
-    if (svg) svg.style.pointerEvents = "none";
 
     circle.addEventListener("click", function (e) {
       e.preventDefault();

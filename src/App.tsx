@@ -6,6 +6,7 @@ import { memoryRoute } from "./routes/memory.tsx";
 import { messengerRoute } from "./routes/messenger.tsx";
 import { pullRequestsRoute } from "./routes/pull-requests.tsx";
 import { sshRoute } from "./routes/ssh.tsx";
+import { utilsRoute } from "./routes/utils.tsx";
 import "./App.css";
 
 const routeTree = rootRoute.addChildren([
@@ -14,6 +15,7 @@ const routeTree = rootRoute.addChildren([
   sshRoute,
   messengerRoute,
   memoryRoute,
+  utilsRoute,
 ]);
 
 const router = createRouter({ routeTree });

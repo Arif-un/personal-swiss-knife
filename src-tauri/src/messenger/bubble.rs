@@ -3,7 +3,9 @@
 //! The Messenger window is a single, decorationless, transparent webview that
 //! morphs between two states:
 //!
-//! * **Full** — a normal 1000x760 window showing facebook.com/messages.
+//! * **Full** — a normal window showing facebook.com/messages (default
+//!   1000x760; the user's resized size + position are remembered and restored
+//!   on the next expand and across app restarts).
 //! * **Bubble** — a tiny (~76px) always-on-top circle drawn by an injected
 //!   overlay (see `js/bubble.js`). The FB page stays loaded behind the opaque
 //!   circle, so the unread count keeps updating live.
@@ -36,6 +38,12 @@ const MARGIN: f64 = 12.0;
 /// area in Tauri v2, so we approximate).
 const TOP_OFFSET: f64 = 40.0;
 const ANIM_MS: u64 = 240;
+/// Debounce for persisting the full window's geometry: a drag-resize/move fires
+/// a burst of events, so we coalesce them into one disk write after the burst.
+const FULL_PERSIST_DEBOUNCE_MS: u64 = 400;
+/// Floor below which a captured full-mode geometry is ignored, so a stray event
+/// (e.g. a bubble-sized frame) never gets persisted as the restore rect.
+const MIN_FULL: f64 = 160.0;
 /// Frame budget between tween updates (~120fps). The tween is driven by real
 /// elapsed time, not a fixed step count, so a slow frame never stalls or drifts
 /// the animation — it just draws fewer frames while still finishing in ANIM_MS.
@@ -77,6 +85,11 @@ pub struct BubbleState {
     last_move: Mutex<Option<Instant>>,
     /// Remembered bubble position (logical, top-left), persisted to disk.
     pos: Mutex<Option<(f64, f64)>>,
+    /// Remembered full-window geometry (logical), persisted to disk. Restored on
+    /// expand and on a cold app launch so the user's chosen size/spot survives.
+    full: Mutex<Option<Rect>>,
+    /// Debounce generation for coalescing full-geometry disk writes during a drag.
+    full_gen: AtomicU64,
     muted: AtomicBool,
     /// Whether an unfocused full window auto-collapses to the bubble after the
     /// idle timeout. Toggleable from the bubble's right-click menu; persisted.
@@ -101,6 +114,8 @@ impl BubbleState {
             moves: AtomicU64::new(0),
             last_move: Mutex::new(None),
             pos: Mutex::new(None),
+            full: Mutex::new(None),
+            full_gen: AtomicU64::new(0),
             muted: AtomicBool::new(false),
             auto_collapse: AtomicBool::new(true),
             auto_collapse_secs: AtomicU64::new(DEFAULT_IDLE_SECS),
@@ -184,6 +199,21 @@ fn clamp_bubble(win: &WebviewWindow, x: f64, y: f64) -> (f64, f64) {
         (my + mh - BUBBLE - MARGIN).max(my + TOP_OFFSET),
     );
     (cx, cy)
+}
+
+/// Clamp a remembered full-window rect so it fits on the current monitor: size is
+/// capped to the work area, then the top-left is pulled inside the edges. Guards
+/// against a saved geometry from a larger/other display leaving the window
+/// off-screen or oversized.
+fn clamp_full(win: &WebviewWindow, r: Rect) -> Rect {
+    let (mx, my, mw, mh) = monitor_bounds(win);
+    let w = r.w.min(mw - 2.0 * MARGIN).max(MIN_FULL);
+    let h = r.h.min(mh - TOP_OFFSET - MARGIN).max(MIN_FULL);
+    let x =
+        r.x.clamp(mx + MARGIN, (mx + mw - w - MARGIN).max(mx + MARGIN));
+    let y =
+        r.y.clamp(my + TOP_OFFSET, (my + mh - h - MARGIN).max(my + TOP_OFFSET));
+    Rect { x, y, w, h }
 }
 
 /// Tween the window from `from` to `to` on a background thread. A newer call
@@ -291,29 +321,52 @@ pub fn enter_full(app: &AppHandle) {
     set_window_shadow(&win, true);
     let _ = win.eval("window.__skSetState&&window.__skSetState('full')");
 
-    let (mx, my, mw, mh) = monitor_bounds(&win);
-    let tx = if mw > FULL_W + 2.0 * MARGIN {
+    let target = full_target(app, &win, from);
+    // Persist immediately so the restored geometry survives even if the user
+    // expands and quits without ever nudging the window.
+    remember_full(app, target);
+    animate(app.clone(), win.clone(), from, target);
+    let _ = win.set_focus();
+}
+
+/// The rect the full window should tween to: the remembered geometry (clamped to
+/// the current monitor) if we have one, else the legacy behavior of a default
+/// FULL_W x FULL_H window anchored at the bubble's spot.
+fn full_target(app: &AppHandle, win: &WebviewWindow, from: Rect) -> Rect {
+    if let Some(r) = *app.state::<BubbleState>().full.lock().unwrap() {
+        return clamp_full(win, r);
+    }
+    let (mx, my, mw, mh) = monitor_bounds(win);
+    let x = if mw > FULL_W + 2.0 * MARGIN {
         from.x.clamp(mx + MARGIN, mx + mw - FULL_W - MARGIN)
     } else {
         mx + MARGIN
     };
-    let ty = if mh > FULL_H + TOP_OFFSET + MARGIN {
+    let y = if mh > FULL_H + TOP_OFFSET + MARGIN {
         from.y.clamp(my + TOP_OFFSET, my + mh - FULL_H - MARGIN)
     } else {
         my + TOP_OFFSET
     };
-    animate(
-        app.clone(),
-        win.clone(),
-        from,
-        Rect {
-            x: tx,
-            y: ty,
-            w: FULL_W,
-            h: FULL_H,
-        },
-    );
-    let _ = win.set_focus();
+    Rect {
+        x,
+        y,
+        w: FULL_W,
+        h: FULL_H,
+    }
+}
+
+/// Apply the saved full-window geometry to a freshly built window (cold launch),
+/// so a restart restores the user's chosen size + position. No-op if nothing is
+/// remembered, leaving the builder's default size.
+pub fn apply_saved_full_geometry(app: &AppHandle, win: &WebviewWindow) {
+    ensure_loaded(app);
+    let Some(r) = *app.state::<BubbleState>().full.lock().unwrap() else {
+        return;
+    };
+    let t = clamp_full(win, r);
+    let _ = win.set_size(LogicalSize::new(t.w, t.h));
+    let _ = win.set_position(LogicalPosition::new(t.x, t.y));
+    set_full(app, t);
 }
 
 /// Left-click on the bubble. Ignored if it is the tail end of a drag.
@@ -391,7 +444,10 @@ pub fn show_menu(app: &AppHandle) {
     else {
         return;
     };
-    let auto = app.state::<BubbleState>().auto_collapse.load(Ordering::SeqCst);
+    let auto = app
+        .state::<BubbleState>()
+        .auto_collapse
+        .load(Ordering::SeqCst);
     let Ok(auto_it) =
         CheckMenuItem::with_id(app, MENU_AUTO, "Auto-collapse", true, auto, None::<&str>)
     else {
@@ -425,15 +481,34 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             api.prevent_close();
             let _ = window.hide();
         }
-        WindowEvent::Moved(_) => {
+        // Track resizes of the full window so the user's chosen size persists.
+        // Ignored during our own tween (set_size) and in bubble mode (fixed size).
+        WindowEvent::Resized(_) => {
             let app = window.app_handle().clone();
             let st = app.state::<BubbleState>();
-            // Ignore position changes we caused ourselves (animation) or that
-            // happen while the window is in full mode.
             if st.animating.load(Ordering::SeqCst) {
                 return;
             }
+            if *st.mode.lock().unwrap() != Mode::Full {
+                return;
+            }
+            if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
+                remember_full_geometry(&app, &win);
+            }
+        }
+        WindowEvent::Moved(_) => {
+            let app = window.app_handle().clone();
+            let st = app.state::<BubbleState>();
+            // Ignore position changes we caused ourselves (animation).
+            if st.animating.load(Ordering::SeqCst) {
+                return;
+            }
+            // In full mode a move just updates the remembered full geometry; the
+            // edge-snap logic below is bubble-only.
             if *st.mode.lock().unwrap() != Mode::Bubble {
+                if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
+                    remember_full_geometry(&app, &win);
+                }
                 return;
             }
             *st.last_move.lock().unwrap() = Some(Instant::now());
@@ -581,6 +656,46 @@ fn remember_pos(app: &AppHandle, x: f64, y: f64) {
     persist(app);
 }
 
+/// Update the remembered full geometry in memory only (no disk write).
+fn set_full(app: &AppHandle, r: Rect) {
+    *app.state::<BubbleState>().full.lock().unwrap() = Some(r);
+}
+
+/// Update the remembered full geometry and flush it to disk immediately. Used for
+/// discrete events (expand); live drags use `remember_full_geometry`, which
+/// debounces the write.
+fn remember_full(app: &AppHandle, r: Rect) {
+    set_full(app, r);
+    persist(app);
+}
+
+/// Capture the full window's current geometry as the restore rect, debouncing the
+/// disk write across a drag burst. Skips maximized/minimized/tiny frames so the
+/// persisted value stays a sane "restore" size.
+fn remember_full_geometry(app: &AppHandle, win: &WebviewWindow) {
+    if matches!(win.is_minimized(), Ok(true)) || matches!(win.is_maximized(), Ok(true)) {
+        return;
+    }
+    let r = current_rect(win);
+    if r.w < MIN_FULL || r.h < MIN_FULL {
+        return;
+    }
+    set_full(app, r);
+    let n = app
+        .state::<BubbleState>()
+        .full_gen
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(FULL_PERSIST_DEBOUNCE_MS));
+        if app.state::<BubbleState>().full_gen.load(Ordering::SeqCst) != n {
+            return; // superseded by a later move/resize in the same burst
+        }
+        persist(&app);
+    });
+}
+
 fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path()
         .app_config_dir()
@@ -608,6 +723,14 @@ fn ensure_loaded(app: &AppHandle) {
         v.get("y").and_then(|y| y.as_f64()),
     ) {
         *st.pos.lock().unwrap() = Some((x, y));
+    }
+    if let (Some(x), Some(y), Some(w), Some(h)) = (
+        v.get("fx").and_then(|n| n.as_f64()),
+        v.get("fy").and_then(|n| n.as_f64()),
+        v.get("fw").and_then(|n| n.as_f64()),
+        v.get("fh").and_then(|n| n.as_f64()),
+    ) {
+        *st.full.lock().unwrap() = Some(Rect { x, y, w, h });
     }
     if let Some(m) = v.get("muted").and_then(|m| m.as_bool()) {
         st.muted.store(m, Ordering::SeqCst);
@@ -648,17 +771,30 @@ fn persist(app: &AppHandle) {
     };
     let st = app.state::<BubbleState>();
     let pos = *st.pos.lock().unwrap();
+    let full = *st.full.lock().unwrap();
     let muted = st.muted.load(Ordering::SeqCst);
     let auto = st.auto_collapse.load(Ordering::SeqCst);
     let secs = st.auto_collapse_secs.load(Ordering::SeqCst);
-    let (x, y) = pos.unwrap_or((0.0, 0.0));
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(
-        &path,
-        format!(
-            "{{\"x\":{x},\"y\":{y},\"muted\":{muted},\"auto_collapse\":{auto},\"auto_collapse_secs\":{secs}}}"
-        ),
-    );
+    let mut obj = serde_json::json!({
+        "muted": muted,
+        "auto_collapse": auto,
+        "auto_collapse_secs": secs,
+    });
+    // Only persist x/y once a real bubble position exists. Writing (0,0) for an
+    // unset `pos` would reload as a genuine top-left position and defeat the
+    // default top-right placement on the first collapse.
+    if let Some((x, y)) = pos {
+        obj["x"] = x.into();
+        obj["y"] = y.into();
+    }
+    if let Some(r) = full {
+        obj["fx"] = r.x.into();
+        obj["fy"] = r.y.into();
+        obj["fw"] = r.w.into();
+        obj["fh"] = r.h.into();
+    }
+    let _ = std::fs::write(&path, obj.to_string());
 }

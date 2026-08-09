@@ -39,6 +39,13 @@ const TITLEBAR_JS: &str = include_str!("js/titlebar.js");
 /// See `bubble.rs` for the window-morphing logic.
 const BUBBLE_JS: &str = include_str!("js/bubble.js");
 
+/// The overlay stylesheet, injected once via `inject-style.js`. Tauri's only
+/// page-injection channel here is `initialization_script` (JS, not raw CSS), so
+/// the CSS is handed to the page as a JS global and `inject-style.js` mounts it
+/// as a `<style>` element (re-adding it after the SPA wipes the DOM).
+const MESSENGER_CSS: &str = include_str!("css/messenger.css");
+const INJECT_STYLE_JS: &str = include_str!("js/inject-style.js");
+
 /// Whether `raw` parses as an `http`/`https` URL. The click interceptor's own
 /// scheme check runs inside the remote, untrusted Messenger page and is trivially
 /// bypassable (a script can navigate straight to `swissknife-link://...`), so we
@@ -191,7 +198,8 @@ fn round_corners(_win: &WebviewWindow, _radius: f64) {}
 /// is created lazily on first use and, thanks to the close handler in `lib.rs`,
 /// is hidden (not destroyed) on close so reopening is instant.
 #[tauri::command]
-pub fn messenger_open(app: AppHandle) -> Result<(), String> {
+pub fn messenger_open(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
         win.show().map_err(|e| e.to_string())?;
         win.set_focus().map_err(|e| e.to_string())?;
@@ -208,12 +216,21 @@ pub fn messenger_open(app: AppHandle) -> Result<(), String> {
         .decorations(false)
         .transparent(true)
         .user_agent(DESKTOP_UA)
+        // CSS first so the stylesheet exists before the overlay JS builds elements.
+        .initialization_script(format!(
+            "window.__SK_CSS={};",
+            serde_json::to_string(MESSENGER_CSS).unwrap_or_default()
+        ))
+        .initialization_script(INJECT_STYLE_JS)
         .initialization_script(INTERCEPTOR_JS)
         .initialization_script(TITLEBAR_JS)
         .initialization_script(BUBBLE_JS)
         .on_navigation(move |url| on_navigation(&handle, url))
         .build()
         .map_err(|e| e.to_string())?;
+    // Restore the user's last full-window size + position (a cold launch builds a
+    // fresh window at the default inner_size otherwise).
+    crate::messenger::bubble::apply_saved_full_geometry(&app, &win);
     round_corners(&win, 12.0);
 
     // Route native context-menu selections (from the bubble's right-click menu)
@@ -229,7 +246,8 @@ pub fn messenger_open(app: AppHandle) -> Result<(), String> {
 /// Destroy the Messenger window to reclaim its RAM (as opposed to the default
 /// close, which only hides it). Also closes the preview window if open.
 #[tauri::command]
-pub fn messenger_close(app: AppHandle) -> Result<(), String> {
+pub fn messenger_close(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
+    crate::security::require_main(&window)?;
     if let Some(win) = app.get_webview_window(PEEK_LABEL) {
         let _ = win.destroy();
     }
