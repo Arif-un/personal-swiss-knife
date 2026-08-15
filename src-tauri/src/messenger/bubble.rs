@@ -24,6 +24,7 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::{
     AppHandle, LogicalPosition, LogicalSize, Manager, WebviewWindow, Window, WindowEvent, Wry,
 };
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::messenger::{MESSENGER_LABEL, PEEK_LABEL};
 
@@ -65,6 +66,12 @@ const MENU_AUTO: &str = "sk_bubble_auto";
 /// auto-collapse entirely.
 const DEFAULT_IDLE_SECS: u64 = 60;
 
+/// Default global shortcut that toggles the Messenger window between full and
+/// bubble. `CmdOrCtrl` is Cmd on macOS and Ctrl elsewhere. User-rebindable from
+/// the Messenger page and persisted (as a Tauri accelerator string) in
+/// `bubble.json`. Plain Esc still collapses too (handled in `js/bubble.js`).
+const DEFAULT_SHORTCUT: &str = "CmdOrCtrl+Escape";
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum Mode {
     Full,
@@ -99,6 +106,9 @@ pub struct BubbleState {
     /// Idle-timer generation: bumping it (on refocus or a config change) cancels
     /// any in-flight auto-collapse countdown.
     idle: AtomicU64,
+    /// The global toggle accelerator (Tauri accelerator string). `None` until
+    /// loaded from disk; falls back to `DEFAULT_SHORTCUT`. Persisted.
+    shortcut: Mutex<Option<String>>,
     /// Whether the persisted position/mute have been loaded from disk yet.
     loaded: AtomicBool,
     /// Keeps the most recent context menu alive while it is displayed.
@@ -120,6 +130,7 @@ impl BubbleState {
             auto_collapse: AtomicBool::new(true),
             auto_collapse_secs: AtomicU64::new(DEFAULT_IDLE_SECS),
             idle: AtomicU64::new(0),
+            shortcut: Mutex::new(None),
             loaded: AtomicBool::new(false),
             menu: Mutex::new(None),
         }
@@ -302,6 +313,13 @@ pub fn enter_bubble(app: &AppHandle) {
     );
 }
 
+/// Sync the tracked mode to Full without any window animation. Called when a fresh
+/// full-sized window is built (see `open_or_show`), so `mode` matches the real window
+/// after a quit-while-collapsed + rebuild instead of staying stale at Bubble.
+pub fn mark_full(app: &AppHandle) {
+    *app.state::<BubbleState>().mode.lock().unwrap() = Mode::Full;
+}
+
 /// Grow the bubble back to the full Messenger window, anchored at the bubble's
 /// spot and clamped to stay on screen.
 pub fn enter_full(app: &AppHandle) {
@@ -382,6 +400,86 @@ pub fn expand_click(app: &AppHandle) {
         return;
     }
     enter_full(app);
+}
+
+/// The current toggle accelerator (persisted value, or the default).
+pub fn get_shortcut(app: &AppHandle) -> String {
+    ensure_loaded(app);
+    app.state::<BubbleState>()
+        .shortcut
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| DEFAULT_SHORTCUT.to_string())
+}
+
+/// Register `accel` as the global toggle shortcut, unregistering whatever was
+/// bound before. The new accelerator becomes the remembered one only on success,
+/// so a bad string leaves the old binding intact.
+pub fn register_shortcut(app: &AppHandle, accel: &str) -> Result<(), String> {
+    let gs = app.global_shortcut();
+    let prev = app.state::<BubbleState>().shortcut.lock().unwrap().clone();
+    // Already bound to this combo: nothing to do (re-registering errors).
+    if prev.as_deref() == Some(accel) {
+        return Ok(());
+    }
+    // Register the new accelerator BEFORE unregistering the old one, so a bad or
+    // OS-occupied combo fails with the existing binding still intact.
+    gs.register(accel).map_err(|e| e.to_string())?;
+    if let Some(prev) = prev {
+        let _ = gs.unregister(prev.as_str());
+    }
+    *app.state::<BubbleState>().shortcut.lock().unwrap() = Some(accel.to_string());
+    Ok(())
+}
+
+/// Rebind the toggle shortcut from the UI: register, then persist.
+pub fn set_shortcut(app: &AppHandle, accel: &str) -> Result<(), String> {
+    register_shortcut(app, accel)?;
+    persist(app);
+    Ok(())
+}
+
+/// Register the persisted (or default) shortcut at startup.
+pub fn init_shortcut(app: &AppHandle) {
+    let accel = get_shortcut(app);
+    // get_shortcut -> ensure_loaded populates st.shortcut from disk WITHOUT
+    // registering with the OS. Clear it first so register_shortcut's dedup guard
+    // (which treats the remembered value as proof of OS registration) can't
+    // short-circuit and skip the actual gs.register at startup.
+    *app.state::<BubbleState>().shortcut.lock().unwrap() = None;
+    if let Err(e) = register_shortcut(app, &accel) {
+        eprintln!("messenger: failed to register toggle shortcut {accel:?}: {e}");
+    }
+}
+
+/// Global-shortcut handler: toggle the Messenger window between full and bubble.
+/// Window ops (eval / always-on-top / shadow) are macOS-main-thread only, so hop
+/// to the main thread before touching the window.
+pub fn on_shortcut(app: &AppHandle) {
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || toggle(&app));
+}
+
+fn toggle(app: &AppHandle) {
+    let Some(win) = app.get_webview_window(MESSENGER_LABEL) else {
+        // Fully freed (messenger_close): rebuild it, which opens full.
+        let _ = crate::messenger::commands::open_or_show(app);
+        return;
+    };
+    // Warm-but-hidden or minimized: bring it back as a full window rather than
+    // popping a bubble the user can't see.
+    if !matches!(win.is_visible(), Ok(true)) || matches!(win.is_minimized(), Ok(true)) {
+        let _ = win.unminimize();
+        let _ = win.show();
+        enter_full(app);
+        return;
+    }
+    let mode = *app.state::<BubbleState>().mode.lock().unwrap();
+    match mode {
+        Mode::Full => enter_bubble(app),
+        Mode::Bubble => enter_full(app),
+    }
 }
 
 /// Hide the window but keep it warm (matches the native close handler).
@@ -741,6 +839,9 @@ fn ensure_loaded(app: &AppHandle) {
     if let Some(s) = v.get("auto_collapse_secs").and_then(|s| s.as_u64()) {
         st.auto_collapse_secs.store(s, Ordering::SeqCst);
     }
+    if let Some(s) = v.get("shortcut").and_then(|s| s.as_str()) {
+        *st.shortcut.lock().unwrap() = Some(s.to_string());
+    }
 }
 
 /// Toggle the native window shadow. On macOS a transparent window's shadow is a
@@ -775,6 +876,7 @@ fn persist(app: &AppHandle) {
     let muted = st.muted.load(Ordering::SeqCst);
     let auto = st.auto_collapse.load(Ordering::SeqCst);
     let secs = st.auto_collapse_secs.load(Ordering::SeqCst);
+    let shortcut = st.shortcut.lock().unwrap().clone();
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -783,6 +885,9 @@ fn persist(app: &AppHandle) {
         "auto_collapse": auto,
         "auto_collapse_secs": secs,
     });
+    if let Some(s) = shortcut {
+        obj["shortcut"] = s.into();
+    }
     // Only persist x/y once a real bubble position exists. Writing (0,0) for an
     // unset `pos` would reload as a genuine top-left position and defeat the
     // default top-right placement on the first collapse.

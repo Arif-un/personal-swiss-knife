@@ -10,8 +10,22 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri_plugin_global_shortcut::ShortcutState;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Global shortcut that toggles the Messenger window between full and
+        // bubble. The combo is user-configurable (Messenger page) and registered
+        // in `setup`; this only routes the keypress to the toggle handler.
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        messenger::bubble::on_shortcut(app);
+                    }
+                })
+                .build(),
+        )
         .manage(ssh::session::SshState::new())
         .manage(messenger::bubble::BubbleState::new())
         // Open the RAM-history store and start the 15-min background sampler. A
@@ -29,6 +43,8 @@ pub fn run() {
                     app.manage(memtrack::MemStore::disabled());
                 }
             }
+            // Register the persisted (or default) Messenger toggle shortcut.
+            messenger::bubble::init_shortcut(app.handle());
             Ok(())
         })
         // Messenger window events: keep it warm on close (hide, not destroy) and
@@ -66,6 +82,8 @@ pub fn run() {
             ssh::commands::forwards_list,
             messenger::commands::messenger_open,
             messenger::commands::messenger_close,
+            messenger::commands::messenger_get_shortcut,
+            messenger::commands::messenger_set_shortcut,
             memtrack::commands::memory_history,
             memtrack::commands::memory_latest,
             memtrack::commands::memory_snapshot_now,

@@ -79,13 +79,22 @@
     updateBadge();
   };
 
-  // Esc collapses a full window back to the bubble (same path as the title bar's
-  // collapse button). Capture phase so we win before Facebook's own Esc handlers;
-  // no-op while already a bubble.
+  // Plain Esc collapses a full window back to the bubble (same path as the title
+  // bar's collapse button). Capture phase so we win before Facebook's own Esc
+  // handlers; no-op while already a bubble. Requires NO modifiers so it doesn't
+  // double-fire with the configurable Cmd+Esc toggle (a global shortcut handled
+  // in Rust, which also works from the bubble and from other apps).
   document.addEventListener(
     "keydown",
     function (e) {
-      if (e.key === "Escape" && window.__skMode !== "bubble") {
+      if (
+        e.key === "Escape" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        window.__skMode !== "bubble"
+      ) {
         e.preventDefault();
         e.stopPropagation();
         act("collapse");

@@ -200,17 +200,24 @@ fn round_corners(_win: &WebviewWindow, _radius: f64) {}
 #[tauri::command]
 pub fn messenger_open(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     crate::security::require_main(&window)?;
+    open_or_show(&app)
+}
+
+/// Build the Messenger window (or show + focus it if already warm). Trusted Rust
+/// entry point shared by the `messenger_open` command and the global toggle
+/// shortcut, so it skips the `require_main` gate the command applies.
+pub fn open_or_show(app: &AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
         win.show().map_err(|e| e.to_string())?;
         win.set_focus().map_err(|e| e.to_string())?;
-        crate::messenger::bubble::on_opened(&app);
+        crate::messenger::bubble::on_opened(app);
         return Ok(());
     }
     let url: Url = MESSENGER_URL
         .parse()
         .map_err(|_| "invalid messenger url".to_string())?;
     let handle = app.clone();
-    let win = WebviewWindowBuilder::new(&app, MESSENGER_LABEL, WebviewUrl::External(url))
+    let win = WebviewWindowBuilder::new(app, MESSENGER_LABEL, WebviewUrl::External(url))
         .title("Messenger")
         .inner_size(1000.0, 760.0)
         .decorations(false)
@@ -233,7 +240,7 @@ pub fn messenger_open(window: WebviewWindow, app: AppHandle) -> Result<(), Strin
         .map_err(|e| e.to_string())?;
     // Restore the user's last full-window size + position (a cold launch builds a
     // fresh window at the default inner_size otherwise).
-    crate::messenger::bubble::apply_saved_full_geometry(&app, &win);
+    crate::messenger::bubble::apply_saved_full_geometry(app, &win);
     round_corners(&win, 12.0);
 
     // Route native context-menu selections (from the bubble's right-click menu)
@@ -242,8 +249,32 @@ pub fn messenger_open(window: WebviewWindow, app: AppHandle) -> Result<(), Strin
     win.on_menu_event(move |_win, event| {
         crate::messenger::bubble::on_menu_event(&menu_handle, event.id().as_ref());
     });
-    crate::messenger::bubble::on_opened(&app);
+    // A fresh window is always built full-sized, so sync the tracked mode. Skipping
+    // this leaves `mode` stale at Bubble after a quit-while-collapsed + rebuild, so
+    // the next toggle mis-routes to enter_full and auto-collapse stays disarmed.
+    crate::messenger::bubble::mark_full(app);
+    crate::messenger::bubble::on_opened(app);
     Ok(())
+}
+
+/// Read the current global toggle shortcut (a Tauri accelerator string) so the
+/// Messenger settings page can show and record it.
+#[tauri::command]
+pub fn messenger_get_shortcut(window: WebviewWindow, app: AppHandle) -> Result<String, String> {
+    crate::security::require_main(&window)?;
+    Ok(crate::messenger::bubble::get_shortcut(&app))
+}
+
+/// Rebind the global toggle shortcut. Registers the new accelerator (replacing the
+/// old) and persists it. Errors on an unparseable/occupied accelerator.
+#[tauri::command]
+pub fn messenger_set_shortcut(
+    window: WebviewWindow,
+    app: AppHandle,
+    accelerator: String,
+) -> Result<(), String> {
+    crate::security::require_main(&window)?;
+    crate::messenger::bubble::set_shortcut(&app, &accelerator)
 }
 
 /// Destroy the Messenger window to reclaim its RAM (as opposed to the default
