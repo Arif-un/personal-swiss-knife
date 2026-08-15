@@ -96,10 +96,7 @@ pub fn host_delete(window: WebviewWindow, app: AppHandle, host: Host) -> Result<
 }
 
 #[tauri::command]
-pub fn discover_history_hosts(
-    window: WebviewWindow,
-    app: AppHandle,
-) -> Result<Vec<Host>, String> {
+pub fn discover_history_hosts(window: WebviewWindow, app: AppHandle) -> Result<Vec<Host>, String> {
     crate::security::require_main(&window)?;
     let existing = all_hosts(&app)?;
     let mut found = crate::ssh::discover::discover_hosts();

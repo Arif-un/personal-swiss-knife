@@ -13,9 +13,11 @@ const REFETCH_MS = 4_000;
 function ciscoStatusLabel(s: CiscoStatus | undefined): { text: string; dot: string } {
   if (!s) return { text: "Checking…", dot: "bg-muted-foreground" };
   if (!s.installed) return { text: "Not installed", dot: "bg-muted-foreground" };
+  // Profile presence is the real on/off signal: vpnagentd respawns acumbrellaagent
+  // regardless of the profile, so `running` alone would show green after a disable.
+  if (!s.profilePresent) return { text: "Disabled", dot: "bg-red-500" };
   if (s.running) return { text: "Enabled · running", dot: "bg-green-500" };
-  if (s.profilePresent) return { text: "Enabled · starting…", dot: "bg-amber-500" };
-  return { text: "Disabled", dot: "bg-red-500" };
+  return { text: "Enabled · starting…", dot: "bg-amber-500" };
 }
 
 function UtilsPage() {
@@ -35,10 +37,7 @@ function UtilsPage() {
       // times to catch the agent coming up.
       qc.setQueryData(utilsKeys.ciscoStatus(), fresh);
       for (const ms of [1500, 3500]) {
-        window.setTimeout(
-          () => qc.invalidateQueries({ queryKey: utilsKeys.ciscoStatus() }),
-          ms,
-        );
+        window.setTimeout(() => qc.invalidateQueries({ queryKey: utilsKeys.ciscoStatus() }), ms);
       }
     },
   });
