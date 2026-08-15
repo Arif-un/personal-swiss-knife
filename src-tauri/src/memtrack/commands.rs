@@ -46,6 +46,28 @@ pub async fn memory_latest(
     .map_err(|e| e.to_string())?
 }
 
+/// The snapshot recorded at `ts` (unix seconds) with its per-process breakdown,
+/// backing the chart's per-point drill-down. `None` when no snapshot matches or
+/// tracking is disabled.
+#[tauri::command]
+pub async fn memory_snapshot_at(
+    window: tauri::WebviewWindow,
+    store: State<'_, MemStore>,
+    ts: i64,
+) -> Result<Option<Snapshot>, String> {
+    crate::security::require_main(&window)?;
+    let conn = store.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let guard = conn.lock().map_err(|e| e.to_string())?;
+        let Some(conn) = guard.as_ref() else {
+            return Ok(None);
+        };
+        store::snapshot_at(conn, ts)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Take, persist, and return a snapshot on demand (the "Snapshot now" button).
 /// The scan, insert, and prune all run on the blocking pool so neither the UI
 /// thread nor an async runtime worker stalls on SQLite.

@@ -36,6 +36,8 @@ pub struct ProcSample {
     pub pid: u32,
     pub name: String,
     pub rss_bytes: u64,
+    /// True for the app's own (root) process; false for spawned descendants.
+    pub is_main: bool,
 }
 
 /// A full snapshot: the summed total plus the per-process breakdown.

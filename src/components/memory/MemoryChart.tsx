@@ -2,6 +2,7 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -20,6 +21,16 @@ interface Props {
   data: SnapshotSummary[];
   /** Selected window in seconds, used to pick tick granularity. */
   rangeSeconds: number;
+  /** ts (unix seconds) of the point whose breakdown the table is showing. */
+  selectedTs: number | null;
+  /** Fires with a point's ts when the user clicks it, to drive the table. */
+  onSelect: (ts: number) => void;
+}
+
+/** recharts 3's chart onClick param exposes the hovered x value as `activeLabel`
+ *  (no `activePayload` like v2); our XAxis dataKey is `tsMs`, so this is epoch ms. */
+interface ChartClick {
+  activeLabel?: number;
 }
 
 /** A chart point; `totalRss` is null at an inserted break so recharts leaves a
@@ -51,7 +62,7 @@ function ChartTooltip({ active, payload }: TooltipPayload) {
 
 /** Single-series area chart of total RAM over time. The page title names the
  *  series, so no legend is needed (dataviz single-series rule). */
-export function MemoryChart({ data, rangeSeconds }: Props) {
+export function MemoryChart({ data, rangeSeconds, selectedTs, onSelect }: Props) {
   if (data.length === 0) {
     return (
       <div className="flex h-72 items-center justify-center rounded-lg border text-sm text-muted-foreground">
@@ -82,7 +93,18 @@ export function MemoryChart({ data, rangeSeconds }: Props) {
   return (
     <div className="h-72 w-full rounded-lg border p-2">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={chartData} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
+        <AreaChart
+          data={chartData}
+          margin={{ top: 8, right: 12, bottom: 4, left: 4 }}
+          onClick={(state) => {
+            const label = (state as ChartClick).activeLabel;
+            if (typeof label !== "number") return;
+            const ts = Math.round(label / 1000);
+            // Only select a real snapshot, never an inserted gap midpoint.
+            if (data.some((d) => d.ts === ts)) onSelect(ts);
+          }}
+          className="cursor-pointer"
+        >
           <defs>
             <linearGradient id="memFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="var(--mem-series)" stopOpacity={0.25} />
@@ -107,6 +129,14 @@ export function MemoryChart({ data, rangeSeconds }: Props) {
             stroke="var(--mem-grid)"
           />
           <Tooltip content={<ChartTooltip />} />
+          {selectedTs != null && (
+            <ReferenceLine
+              x={selectedTs * 1000}
+              stroke="var(--mem-series)"
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+            />
+          )}
           <Area
             type="monotone"
             dataKey="totalRss"

@@ -46,6 +46,9 @@ function StatTile({ label, value, sub }: { label: string; value: string; sub?: s
 function MemoryPage() {
   const qc = useQueryClient();
   const [range, setRange] = useState<RangeKey>("24h");
+  // Which snapshot the breakdown table shows. null = follow the latest snapshot;
+  // set by clicking a point on the chart to drill into a past snapshot.
+  const [selectedTs, setSelectedTs] = useState<number | null>(null);
 
   const { data: history = [] } = useQuery<SnapshotSummary[]>({
     queryKey: memoryKeys.history(),
@@ -56,6 +59,11 @@ function MemoryPage() {
     queryKey: memoryKeys.latest(),
     queryFn: () => memoryApi.latest(),
     refetchInterval: REFETCH_MS,
+  });
+  const { data: selected } = useQuery<Snapshot | null>({
+    queryKey: memoryKeys.snapshot(selectedTs ?? 0),
+    queryFn: () => memoryApi.snapshotAt(selectedTs!),
+    enabled: selectedTs != null,
   });
 
   const snapshotNow = useMutation({
@@ -76,7 +84,10 @@ function MemoryPage() {
 
   const peak = useMemo(() => windowed.reduce((max, p) => Math.max(max, p.totalRss), 0), [windowed]);
 
-  const procs = latest?.processes ?? [];
+  // The snapshot the table renders: the drilled-into one when selected, else latest.
+  const shown = selectedTs != null ? selected : latest;
+  const isPast = selectedTs != null && selectedTs !== latest?.ts;
+  const procs = shown?.processes ?? [];
   const maxProc = procs.reduce((max, p) => Math.max(max, p.rssBytes), 0);
 
   return (
@@ -128,17 +139,28 @@ function MemoryPage() {
         <ErrorBox error={snapshotNow.error} fallback="Failed to take snapshot" />
       )}
 
-      <Suspense
-        fallback={<div className="h-72 w-full rounded-lg border" />}
-      >
-        <MemoryChart data={windowed} rangeSeconds={rangeSeconds} />
+      <Suspense fallback={<div className="h-72 w-full rounded-lg border" />}>
+        <MemoryChart
+          data={windowed}
+          rangeSeconds={rangeSeconds}
+          selectedTs={isPast ? selectedTs : null}
+          onSelect={setSelectedTs}
+        />
       </Suspense>
 
-      {/* latest per-process breakdown */}
+      {/* per-process breakdown for the shown snapshot */}
       <div>
-        <h2 className="mb-2 text-sm font-medium text-muted-foreground">
-          Latest breakdown{latest ? ` — ${formatStamp(latest.ts)}` : ""}
-        </h2>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            {isPast ? "Snapshot" : "Latest"} breakdown
+            {shown ? ` — ${formatStamp(shown.ts)}` : ""}
+          </h2>
+          {isPast && (
+            <Button variant="ghost" size="sm" onClick={() => setSelectedTs(null)}>
+              Back to latest
+            </Button>
+          )}
+        </div>
         <div className="rounded-lg border">
           <Table>
             <TableHeader>
@@ -159,6 +181,11 @@ function MemoryPage() {
                 procs.map((p) => (
                   <TableRow key={p.pid}>
                     <TableCell className="max-w-0 truncate font-medium" title={p.name}>
+                      {p.isMain && (
+                        <span className="mr-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          main
+                        </span>
+                      )}
                       {p.name}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">

@@ -86,6 +86,7 @@ pub fn run() {
             messenger::commands::messenger_set_shortcut,
             memtrack::commands::memory_history,
             memtrack::commands::memory_latest,
+            memtrack::commands::memory_snapshot_at,
             memtrack::commands::memory_snapshot_now,
             utils::commands::cisco_status,
             utils::commands::cisco_set_enabled,

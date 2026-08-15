@@ -3,6 +3,8 @@ export interface ProcSample {
   pid: number;
   name: string;
   rssBytes: number;
+  /** The app's own (root) process; the rest are spawned descendants. */
+  isMain: boolean;
 }
 
 /** A full snapshot: summed total plus the per-process breakdown. */
