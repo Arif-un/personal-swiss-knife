@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { rootRoute } from "./routes/__root.tsx";
+import { deployRoute } from "./routes/deploy.tsx";
 import { indexRoute } from "./routes/index.tsx";
 import { memoryRoute } from "./routes/memory.tsx";
 import { messengerRoute } from "./routes/messenger.tsx";
@@ -16,6 +17,7 @@ const routeTree = rootRoute.addChildren([
   messengerRoute,
   memoryRoute,
   utilsRoute,
+  deployRoute,
 ]);
 
 const router = createRouter({ routeTree });

@@ -1,3 +1,4 @@
+mod devkon;
 mod github;
 mod memtrack;
 mod messenger;
@@ -70,6 +71,13 @@ pub fn run() {
             memtrack::commands::memory_snapshot_now,
             utils::commands::cisco_status,
             utils::commands::cisco_set_enabled,
+            devkon::commands::devkon_list,
+            devkon::commands::devkon_save,
+            devkon::commands::devkon_delete,
+            devkon::commands::devkon_branches,
+            devkon::commands::devkon_deploy,
+            devkon::commands::devkon_destroy,
+            devkon::commands::devkon_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

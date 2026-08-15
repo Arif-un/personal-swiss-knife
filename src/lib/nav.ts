@@ -3,6 +3,7 @@ import {
   GitPullRequestIcon,
   HomeIcon,
   MessageCircleIcon,
+  RocketIcon,
   TerminalIcon,
   WrenchIcon,
   type LucideIcon,
@@ -49,5 +50,11 @@ export const navItems: NavItem[] = [
     path: "/utils",
     icon: WrenchIcon,
     description: "System toggles like enabling or disabling Cisco Umbrella.",
+  },
+  {
+    title: "Deploy",
+    path: "/deploy",
+    icon: RocketIcon,
+    description: "Deploy and destroy devkon dev clusters per name.",
   },
 ];
