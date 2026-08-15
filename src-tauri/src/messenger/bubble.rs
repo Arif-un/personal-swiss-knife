@@ -433,6 +433,51 @@ pub fn register_shortcut(app: &AppHandle, accel: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The current auto-collapse idle timeout in seconds. 0 means auto-collapse is
+/// off (either the timeout is 0 or the menu toggle disabled it), so the UI shows
+/// a single number where 0 == disabled.
+pub fn get_idle_secs(app: &AppHandle) -> u64 {
+    ensure_loaded(app);
+    let st = app.state::<BubbleState>();
+    if !st.auto_collapse.load(Ordering::SeqCst) {
+        return 0;
+    }
+    st.auto_collapse_secs.load(Ordering::SeqCst)
+}
+
+/// Set the auto-collapse idle timeout (seconds) from the UI. 0 disables
+/// auto-collapse; any positive value enables it, keeping the bubble menu's
+/// checkbox in sync. Cancels any in-flight countdown so the next blur re-arms
+/// with the new timeout.
+pub fn set_idle_secs(app: &AppHandle, secs: u64) {
+    let st = app.state::<BubbleState>();
+    if secs == 0 {
+        st.auto_collapse.store(false, Ordering::SeqCst);
+    } else {
+        st.auto_collapse.store(true, Ordering::SeqCst);
+        st.auto_collapse_secs.store(secs, Ordering::SeqCst);
+    }
+    st.idle.fetch_add(1, Ordering::SeqCst);
+    persist(app);
+}
+
+/// Whether the unread badge is muted (hidden), for the settings page.
+pub fn get_muted(app: &AppHandle) -> bool {
+    ensure_loaded(app);
+    app.state::<BubbleState>().muted.load(Ordering::SeqCst)
+}
+
+/// Set the badge mute state from the UI, mirroring the bubble menu's checkbox:
+/// update the live overlay and persist.
+pub fn set_muted(app: &AppHandle, muted: bool) {
+    let st = app.state::<BubbleState>();
+    st.muted.store(muted, Ordering::SeqCst);
+    if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
+        let _ = win.eval(format!("window.__skSetMuted&&window.__skSetMuted({muted})"));
+    }
+    persist(app);
+}
+
 /// Rebind the toggle shortcut from the UI: register, then persist.
 pub fn set_shortcut(app: &AppHandle, accel: &str) -> Result<(), String> {
     register_shortcut(app, accel)?;

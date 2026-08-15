@@ -277,6 +277,45 @@ pub fn messenger_set_shortcut(
     crate::messenger::bubble::set_shortcut(&app, &accelerator)
 }
 
+/// Read the current auto-collapse idle timeout (seconds; 0 = disabled) so the
+/// Messenger settings page can show it.
+#[tauri::command]
+pub fn messenger_get_idle_secs(window: WebviewWindow, app: AppHandle) -> Result<u64, String> {
+    crate::security::require_main(&window)?;
+    Ok(crate::messenger::bubble::get_idle_secs(&app))
+}
+
+/// Set the auto-collapse idle timeout (seconds; 0 = disabled) and persist it.
+#[tauri::command]
+pub fn messenger_set_idle_secs(
+    window: WebviewWindow,
+    app: AppHandle,
+    secs: u64,
+) -> Result<(), String> {
+    crate::security::require_main(&window)?;
+    crate::messenger::bubble::set_idle_secs(&app, secs);
+    Ok(())
+}
+
+/// Read whether the unread badge is muted so the settings page can show it.
+#[tauri::command]
+pub fn messenger_get_muted(window: WebviewWindow, app: AppHandle) -> Result<bool, String> {
+    crate::security::require_main(&window)?;
+    Ok(crate::messenger::bubble::get_muted(&app))
+}
+
+/// Mute or unmute the unread badge and persist it.
+#[tauri::command]
+pub fn messenger_set_muted(
+    window: WebviewWindow,
+    app: AppHandle,
+    muted: bool,
+) -> Result<(), String> {
+    crate::security::require_main(&window)?;
+    crate::messenger::bubble::set_muted(&app, muted);
+    Ok(())
+}
+
 /// Destroy the Messenger window to reclaim its RAM (as opposed to the default
 /// close, which only hides it). Also closes the preview window if open.
 #[tauri::command]

@@ -1,8 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createRoute } from "@tanstack/react-router";
-import { ExternalLinkIcon, KeyboardIcon, MessageCircleIcon } from "lucide-react";
+import {
+  BellOffIcon,
+  ExternalLinkIcon,
+  KeyboardIcon,
+  MessageCircleIcon,
+  TimerIcon,
+} from "lucide-react";
+import type { ComponentType } from "react";
 import { useEffect, useState } from "react";
 import { Button } from "#components/ui/button.tsx";
+import { Input } from "#components/ui/input.tsx";
 import { rootRoute } from "./__root.tsx";
 
 const ACCEL_SYM: Record<string, string> = { CmdOrCtrl: "⌘", Cmd: "⌘", Ctrl: "⌃", Alt: "⌥", Shift: "⇧" };
@@ -36,7 +44,111 @@ function toAccel(e: KeyboardEvent): string | null {
   return [...mods, code].join("+");
 }
 
-function ShortcutRecorder() {
+/** One compact settings row: icon + label + hint on the left, control(s) on the
+ *  right. Rows stack inside a single bordered card (divide-y) for density. */
+function SettingRow({
+  icon: Icon,
+  label,
+  hint,
+  error,
+  children,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  hint?: string;
+  error?: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 font-medium">
+          <Icon className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{label}</span>
+        </div>
+        {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+        {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+function MuteRow() {
+  const [muted, setMuted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    invoke<boolean>("messenger_get_muted")
+      .then(setMuted)
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  const toggle = () => {
+    const next = !muted;
+    setMuted(next);
+    invoke("messenger_set_muted", { muted: next }).catch((e) => setError(String(e)));
+  };
+
+  return (
+    <SettingRow
+      icon={BellOffIcon}
+      label="Mute badge"
+      hint="Hide the unread count on the bubble."
+      error={error}
+    >
+      <Button variant={muted ? "default" : "outline"} size="sm" className="min-w-20" onClick={toggle}>
+        {muted ? "Muted" : "Showing"}
+      </Button>
+    </SettingRow>
+  );
+}
+
+function AutoCollapseRow() {
+  const [secs, setSecs] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    invoke<number>("messenger_get_idle_secs")
+      .then((s) => setSecs(String(s)))
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  const save = () => {
+    const n = Math.max(0, Math.round(Number(secs) || 0));
+    setSecs(String(n));
+    invoke("messenger_set_idle_secs", { secs: n })
+      .then(() => {
+        setError(null);
+        setSaved(true);
+        window.setTimeout(() => setSaved(false), 1500);
+      })
+      .catch((e) => setError(String(e)));
+  };
+
+  return (
+    <SettingRow
+      icon={TimerIcon}
+      label="Auto-collapse"
+      hint="Collapse to bubble after N seconds unfocused. 0 = off."
+      error={error}
+    >
+      <Input
+        type="number"
+        min={0}
+        className="h-7 w-20"
+        value={secs}
+        onChange={(e) => setSecs(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === "Enter" && save()}
+      />
+      <span className="text-xs text-muted-foreground">{saved ? "✓ sec" : "sec"}</span>
+    </SettingRow>
+  );
+}
+
+function ShortcutRow() {
   const [accel, setAccel] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,30 +187,25 @@ function ShortcutRecorder() {
   }, [recording]);
 
   return (
-    <div className="rounded-lg border p-3 text-sm">
-      <div className="mb-1 flex items-center gap-2 font-medium">
-        <KeyboardIcon className="size-4 text-muted-foreground" />
-        Collapse / expand shortcut
-      </div>
-      <p className="mb-3 text-muted-foreground">
-        Works from anywhere to toggle the window between full and bubble. Plain Esc also collapses
-        while the window is focused.
-      </p>
-      <div className="flex items-center gap-3">
-        <Button
-          variant="outline"
-          className="min-w-32 font-mono"
-          onClick={() => {
-            setError(null);
-            setRecording((r) => !r);
-          }}
-        >
-          {recording ? "Press keys…" : accel ? prettyAccel(accel) : "Set shortcut"}
-        </Button>
-        {recording && <span className="text-xs text-muted-foreground">Esc to cancel</span>}
-      </div>
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-    </div>
+    <SettingRow
+      icon={KeyboardIcon}
+      label="Toggle shortcut"
+      hint="Global hotkey to collapse/expand. Plain Esc also collapses when focused."
+      error={error}
+    >
+      {recording && <span className="text-xs text-muted-foreground">Esc cancels</span>}
+      <Button
+        variant="outline"
+        size="sm"
+        className="min-w-28 font-mono"
+        onClick={() => {
+          setError(null);
+          setRecording((r) => !r);
+        }}
+      >
+        {recording ? "Press keys…" : accel ? prettyAccel(accel) : "Set shortcut"}
+      </Button>
+    </SettingRow>
   );
 }
 
@@ -123,29 +230,35 @@ function MessengerPage() {
   }, []);
 
   return (
-    <div className="flex max-w-xl flex-col gap-4">
+    <div className="flex max-w-xl flex-col gap-3">
       <div className="flex items-center gap-2">
         <MessageCircleIcon className="size-5 text-muted-foreground" />
         <h1 className="text-xl font-semibold">Messenger</h1>
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Messenger runs in its own native window to keep RAM low. Closing that window keeps it warm
-        for an instant reopen. Use "Close & free RAM" to fully release it.
+        Runs in its own native window to keep RAM low. Closing that window keeps it warm for an
+        instant reopen. "Close &amp; free RAM" fully releases it.
       </p>
 
       <div className="flex gap-2">
-        <Button onClick={open}>Open / Focus</Button>
-        <Button variant="destructive" onClick={closeAndFree}>
+        <Button size="sm" onClick={open}>
+          Open / Focus
+        </Button>
+        <Button size="sm" variant="destructive" onClick={closeAndFree}>
           Close &amp; free RAM
         </Button>
       </div>
 
-      <ShortcutRecorder />
+      <div className="divide-y rounded-lg border">
+        <MuteRow />
+        <AutoCollapseRow />
+        <ShortcutRow />
+      </div>
 
-      <div className="rounded-lg border p-3 text-sm text-muted-foreground">
-        <p className="mb-2 font-medium text-foreground">Links inside chats</p>
-        <ul className="flex flex-col gap-1.5">
+      <div className="rounded-lg border px-3 py-2 text-sm text-muted-foreground">
+        <p className="mb-1.5 font-medium text-foreground">Links inside chats</p>
+        <ul className="flex flex-col gap-1">
           <li className="flex items-center gap-2">
             <ExternalLinkIcon className="size-3.5 shrink-0" />
             Click a link &rarr; opens in a reusable preview window.

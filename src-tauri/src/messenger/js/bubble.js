@@ -55,16 +55,33 @@
     }
   }
 
+  // Facebook flashes its own tab title between "(N) Messenger" and "Messenger"
+  // to grab attention, so mirroring the raw title-count makes the badge blink.
+  // Latch it: hold the last seen count, and only drop to 0 once the title has
+  // read 0 for GRACE_MS straight (a real read) rather than on the momentary 0
+  // of FB's attention flash. Latching also keeps the badge shown once a message
+  // has arrived. Mute still hides it. // ponytail: fixed 5s grace, tune if FB's
+  // flash cadence changes.
+  var GRACE_MS = 5000;
+  var latched = 0;
+  var lastNonZeroAt = 0;
+
   function updateBadge() {
     var badge = document.getElementById(ID + "_badge");
     if (!badge) return;
     var n = 0;
     var m = /^\((\d+)\)/.exec(document.title || "");
     if (m) n = parseInt(m[1], 10) || 0;
-    if (window.__skMuted || n <= 0) {
+    if (n > 0) {
+      latched = n;
+      lastNonZeroAt = Date.now();
+    } else if (Date.now() - lastNonZeroAt >= GRACE_MS) {
+      latched = 0;
+    }
+    if (window.__skMuted || latched <= 0) {
       badge.classList.remove("sk-on");
     } else {
-      badge.textContent = n > 99 ? "99+" : String(n);
+      badge.textContent = latched > 99 ? "99+" : String(latched);
       badge.classList.add("sk-on");
     }
   }

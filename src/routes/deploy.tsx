@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLinkIcon, Trash2Icon } from "lucide-react";
@@ -25,10 +25,10 @@ import {
 } from "#components/devkon/api.ts";
 
 const BRANCH_LIST_ID = "devkon-branches";
-// Cap the "awaiting re-attach" poll window (5s each): ~5min. A real run resolves
-// well within this; the cap stops a never-materializing dispatch (or a persistently
-// failing `gh`) from spawning a subprocess every 5s forever.
-const MAX_AWAIT_POLLS = 60;
+// Cap the "awaiting re-attach" poll window to ~5min of wall-clock. A real run
+// resolves well within this; the cap stops a never-materializing dispatch (or a
+// persistently failing `gh`) from spawning a subprocess every 5s forever.
+const AWAIT_WINDOW_MS = 5 * 60_000;
 
 function accessUrl(name: string) {
   return `https://${name}-dev.devkon.shared.netspring.team`;
@@ -60,6 +60,11 @@ function statusLabel(s: RunStatus | undefined, entry: DevkonEntry): { text: stri
 
 /** Per-row status cell: polls while a run is queued/in-progress. */
 function StatusCell({ entry }: { entry: DevkonEntry }) {
+  // When this row entered "awaiting re-attach", so the window is bounded per-dispatch.
+  // Not q.state.dataUpdateCount: that counts every successful poll for the row's
+  // whole lifetime, so a prior long deploy exhausts the cap and a later awaiting
+  // dispatch would never poll to re-attach (stuck on "Deploying…").
+  const awaitingSince = useRef<number | null>(null);
   const { data } = useQuery({
     queryKey: devkonKeys.status(entry.id),
     queryFn: () => devkonApi.status(entry.id),
@@ -69,9 +74,10 @@ function StatusCell({ entry }: { entry: DevkonEntry }) {
       // Keep polling while a dispatched run is unresolved (awaiting re-attach) or running.
       const awaiting = (d?.runId ?? entry.lastRunId) == null && entry.lastRunKind != null;
       if (awaiting) {
-        const attempts = q.state.dataUpdateCount + q.state.fetchFailureCount;
-        return attempts < MAX_AWAIT_POLLS ? 5_000 : false;
+        if (awaitingSince.current == null) awaitingSince.current = Date.now();
+        return Date.now() - awaitingSince.current < AWAIT_WINDOW_MS ? 5_000 : false;
       }
+      awaitingSince.current = null;
       if (d?.state === "queued" || d?.state === "in_progress") return 5_000;
       return false;
     },
@@ -131,6 +137,12 @@ function DeployRow({
   removePending: boolean;
 }) {
   const [branch, setBranch] = useState(entry.branch);
+  // Local mode too (same reason as branch): the confirm and the backend dispatch
+  // must agree on what's about to run. The backend re-reads mode from disk, and the
+  // `entry` prop lags the save's refetch, so gating the wipe-confirm on the prop let
+  // a fast select-clean-then-Deploy skip the prompt. Local state is set synchronously
+  // on change, so the confirm always reflects the mode the user actually picked.
+  const [mode, setMode] = useState(entry.mode);
   const saveBranch = () => {
     const b = branch.trim();
     if (b !== entry.branch) onSave({ ...entry, branch: b });
@@ -164,10 +176,12 @@ function DeployRow({
 
       <TableCell className="align-top">
         <select
-          value={entry.mode}
-          onChange={(e) =>
-            onSave({ ...entry, branch: branch.trim(), mode: e.target.value as DevkonMode })
-          }
+          value={mode}
+          onChange={(e) => {
+            const m = e.target.value as DevkonMode;
+            setMode(m);
+            onSave({ ...entry, branch: branch.trim(), mode: m });
+          }}
           className="h-7 rounded-lg border bg-background px-2 text-sm"
         >
           {(Object.keys(MODE_LABELS) as DevkonMode[]).map((m) => (
@@ -191,7 +205,7 @@ function DeployRow({
               // Clean modes tear down and recreate the namespace (wiping its data),
               // so confirm - matching Destroy/Remove - instead of a silent one-click.
               if (
-                entry.mode.startsWith("clean") &&
+                mode.startsWith("clean") &&
                 !window.confirm(
                   `Clean redeploy tears down and recreates the "${entry.name}" namespace, wiping its data. Continue?`,
                 )

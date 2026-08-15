@@ -144,7 +144,7 @@ function MemoryPage() {
           data={windowed}
           rangeSeconds={rangeSeconds}
           selectedTs={isPast ? selectedTs : null}
-          onSelect={setSelectedTs}
+          onSelect={(ts) => setSelectedTs(ts === latest?.ts ? null : ts)}
         />
       </Suspense>
 
