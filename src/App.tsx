@@ -7,12 +7,14 @@ import { memoryRoute } from "./routes/memory.tsx";
 import { messengerRoute } from "./routes/messenger.tsx";
 import { pullRequestsRoute } from "./routes/pull-requests.tsx";
 import { sshRoute } from "./routes/ssh.tsx";
+import { submodulesRoute } from "./routes/submodules.tsx";
 import { utilsRoute } from "./routes/utils.tsx";
 import "./App.css";
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   pullRequestsRoute,
+  submodulesRoute,
   sshRoute,
   messengerRoute,
   memoryRoute,

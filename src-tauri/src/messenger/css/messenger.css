@@ -136,3 +136,72 @@ html.sk-page-hidden body {
 #__sk_titlebar:hover .sk-dot::after {
   content: attr(data-glyph);
 }
+
+/* Link-preview modal frame (peek.js). The preview itself is a native child
+   webview inset below the header; these draw the dim backdrop + header bar
+   around it. Geometry MUST match PEEK_MARGIN (24) / PEEK_HEADER (40) in
+   commands.rs so the header meets the child webview's top edge. */
+#__sk_peek {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483645;
+  display: none;
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-user-select: none;
+  user-select: none;
+}
+#__sk_peek.sk-on {
+  display: block;
+}
+
+#__sk_peek_bar {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  right: 24px;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 14px;
+  border-radius: 10px 10px 0 0;
+  background: rgba(28, 28, 30, 0.92);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+#__sk_peek_url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.82);
+  font:
+    500 12px/1 -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
+}
+
+#__sk_peek_close {
+  all: unset;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: default;
+}
+#__sk_peek_close:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}

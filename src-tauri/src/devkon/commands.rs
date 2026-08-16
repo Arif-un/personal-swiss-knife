@@ -62,15 +62,19 @@ fn update_store<T>(path: &Path, f: impl FnOnce(&mut DevkonStore) -> T) -> Result
 fn validate_namespace(name: &str) -> Result<(), String> {
     let ok = !name.is_empty()
         && name.len() <= 63
-        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         && !name.starts_with('-')
         && !name.ends_with('-');
     if ok {
         Ok(())
     } else {
-        Err("name must be a valid namespace: lowercase letters, digits and dashes, \
+        Err(
+            "name must be a valid namespace: lowercase letters, digits and dashes, \
              not starting or ending with a dash, max 63 chars"
-            .into())
+                .into(),
+        )
     }
 }
 

@@ -3,7 +3,26 @@
 use std::path::Path;
 use std::process::Command;
 
+use tauri_plugin_dialog::DialogExt;
+
 use super::{CiscoStatus, DAEMON_LABEL, DAEMON_PLIST, ORGINFO, ORGINFO_OFF};
+
+/// Open a native folder picker and return the chosen path (None if cancelled).
+/// Shared by any page with a directory field (submodules, deploy).
+#[tauri::command]
+pub async fn pick_directory(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    crate::security::require_main(&window)?;
+    // blocking_pick_folder must run off the main thread; it dispatches the dialog
+    // to the main event loop internally.
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(picked.map(|p| p.to_string()))
+}
 
 /// Current Umbrella state (installed / running / profile-present). Read-only, so
 /// no admin auth is needed.

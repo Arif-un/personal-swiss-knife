@@ -95,7 +95,7 @@ pub fn spawn_sampler(app: AppHandle) {
             let app = app.clone();
             if let Err(e) = tauri::async_runtime::spawn_blocking(move || {
                 let mut sys = System::new();
-                let snap = sampler::sample(&mut sys);
+                let snap = sampler::sample(&mut sys, &app);
                 persist(&app, &snap);
             })
             .await

@@ -1,5 +1,6 @@
 import {
   ActivityIcon,
+  GitBranchIcon,
   GitPullRequestIcon,
   HomeIcon,
   MessageCircleIcon,
@@ -26,6 +27,12 @@ export const navItems: NavItem[] = [
     path: "/pull-requests",
     icon: GitPullRequestIcon,
     description: "Browse, filter, and manage GitHub PRs across a repo.",
+  },
+  {
+    title: "Submodules",
+    path: "/submodules",
+    icon: GitBranchIcon,
+    description: "See and switch branches of a superproject and its submodules.",
   },
   {
     title: "SSH",

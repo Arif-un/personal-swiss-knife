@@ -50,6 +50,9 @@ importers:
       react-dom:
         specifier: ^19.1.0
         version: 19.2.7(react@19.2.7)
+      react-icons:
+        specifier: ^5.7.0
+        version: 5.7.0(react@19.2.7)
       recharts:
         specifier: ^3.10.1
         version: 3.10.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@19.2.8)(react@19.2.7)(redux@5.0.1)
@@ -2258,6 +2261,11 @@ packages:
     peerDependencies:
       react: ^19.2.7
 
+  react-icons@5.7.0:
+    resolution: {integrity: sha512-LBLy340Rzqy6+/yVhZKT3B/QpP1BZaesGqasf09HPOBzRarcDIFH0WwXlXQfE7q7ipxK4MSiC5DIBWURCny6fw==}
+    peerDependencies:
+      react: '*'
+
   react-is@19.2.8:
     resolution: {integrity: sha512-s5un28nYxKJw5gvUHyW5PCC28CvBqLu9r3cWgzHT4Vo/5fqqkFcdRYsGcKf50WMPpjjFZS5d76fn3YCo2njKwQ==}
 
@@ -4449,6 +4457,10 @@ snapshots:
     dependencies:
       react: 19.2.7
       scheduler: 0.27.0
+
+  react-icons@5.7.0(react@19.2.7):
+    dependencies:
+      react: 19.2.7
 
   react-is@19.2.8: {}
 

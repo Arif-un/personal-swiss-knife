@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { Check, Loader2, Pencil, Plus, RefreshCw, Settings, Trash2, X } from "lucide-react";
+import {
+  Check,
+  Eye,
+  EyeOff,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Settings,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "#components/ui/button.tsx";
 import { Input } from "#components/ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "#components/ui/popover.tsx";
@@ -12,6 +23,9 @@ interface ViewsMenuProps {
   /** Whether a repo has been fetched, so "save current" makes sense. */
   canSaveCurrent: boolean;
   busy?: boolean;
+  /** Whether the repo input + Fetch + Filters row is currently shown. */
+  topBarVisible: boolean;
+  onToggleTopBar: () => void;
   onApply: (view: PrView) => void;
   onSaveCurrent: (name: string) => void;
   onUpdate: (view: PrView) => void;
@@ -24,6 +38,8 @@ export function ViewsMenu({
   activeViewId,
   canSaveCurrent,
   busy,
+  topBarVisible,
+  onToggleTopBar,
   onApply,
   onSaveCurrent,
   onUpdate,
@@ -65,6 +81,15 @@ export function ViewsMenu({
           <span className="text-sm font-medium">Views</span>
           {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         </div>
+
+        <button
+          type="button"
+          onClick={onToggleTopBar}
+          className="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-sm hover:bg-accent"
+        >
+          {topBarVisible ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+          {topBarVisible ? "Hide search bar" : "Show search bar"}
+        </button>
 
         <div className="max-h-72 overflow-y-auto py-1">
           {views.length === 0 && (

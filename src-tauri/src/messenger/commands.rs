@@ -1,4 +1,7 @@
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewBuilder, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
+};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::messenger::{MESSENGER_LABEL, MESSENGER_URL, PEEK_LABEL, ROUTE_SCHEME};
@@ -8,14 +11,15 @@ use crate::messenger::{MESSENGER_LABEL, MESSENGER_URL, PEEK_LABEL, ROUTE_SCHEME}
 /// present as a normal desktop browser.
 const DESKTOP_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15";
 
-/// Injected into the Messenger webview before every page load. Intercepts user
-/// clicks on external links and hands the target to Rust via the custom
-/// `swissknife-link://` scheme so `on_navigation` can route it. Internal Facebook
-/// navigation (and anything not an anchor click — logins, redirects, captchas) is
-/// left untouched so switching chats and signing in work normally.
-///
-/// Shift-click routes to the system browser; a plain click routes to the reusable
-/// preview ("peek") window.
+/// Injected into the Messenger webview before every page load. Intercepts anchor
+/// clicks and hands the shim-unwrapped target plus the held modifier flags to
+/// Rust via the custom `swissknife-link://` scheme, so `on_navigation` can apply
+/// the user's routing rules (`bubble::LinkRules`). Facebook links are captured
+/// except Messenger's own app routes under `/messages` (thread switching, the
+/// rail), which are left to the SPA so in-app navigation keeps working. Every
+/// other Facebook link (posts, reels, profiles) and all non-Facebook links are
+/// captured. Logins, redirects, and captchas aren't anchor clicks, so they're
+/// untouched too.
 const INTERCEPTOR_JS: &str = include_str!("js/interceptor.js");
 
 /// Injected into the Messenger webview to draw a floating, macOS-style window
@@ -38,6 +42,24 @@ const TITLEBAR_JS: &str = include_str!("js/titlebar.js");
 /// `eval` and actions come back through the same `swissknife-link://` scheme.
 /// See `bubble.rs` for the window-morphing logic.
 const BUBBLE_JS: &str = include_str!("js/bubble.js");
+
+/// Injected into the Messenger webview to draw the modal frame (dim backdrop +
+/// header/close bar) around the link-preview child webview. The preview content
+/// is a native child webview attached to the Messenger window (see `open_peek`);
+/// this only draws the chrome around it. See `js/peek.js`.
+const PEEK_JS: &str = include_str!("js/peek.js");
+
+/// Injected into the preview child webview so Esc closes it even when the panel
+/// (not the Messenger page) has keyboard focus. Routes through the shared scheme,
+/// caught by the child's own `on_navigation` -> `close_peek`.
+const PEEK_ESC_JS: &str = "document.addEventListener('keydown',function(e){if(e.key==='Escape'){window.location.href='swissknife-link://window?action=peek-close';}},true);";
+
+/// Inset of the link-preview modal from the Messenger window edges, and the
+/// height of its header bar. The preview child webview is placed in the rect
+/// below the header; `peek.js` / `messenger.css` draw the frame around it, so
+/// these MUST stay in sync with the geometry in `messenger.css`.
+const PEEK_MARGIN: f64 = 24.0;
+const PEEK_HEADER: f64 = 40.0;
 
 /// The overlay stylesheet, injected once via `inject-style.js`. Tauri's only
 /// page-injection channel here is `initialization_script` (JS, not raw CSS), so
@@ -64,24 +86,97 @@ fn open_external(app: &AppHandle, url: &str) {
     let _ = app.opener().open_url(url.to_string(), None::<&str>);
 }
 
-/// Open a URL in the reusable preview window: reuse the existing "peek" window if
-/// present (navigate + focus), otherwise create a bare one. Closing that window
-/// destroys it, so its RAM is reclaimed rather than kept warm.
+/// Logical (position, size) for the preview child webview: inset by `PEEK_MARGIN`
+/// on the sides and bottom, and sitting below the `PEEK_HEADER` bar at the top.
+fn peek_bounds(win: &WebviewWindow) -> Option<(LogicalPosition<f64>, LogicalSize<f64>)> {
+    let scale = win.scale_factor().ok()?;
+    let sz = win.inner_size().ok()?;
+    let w = sz.width as f64 / scale;
+    let h = sz.height as f64 / scale;
+    let y = PEEK_MARGIN + PEEK_HEADER;
+    let cw = (w - 2.0 * PEEK_MARGIN).max(120.0);
+    let ch = (h - y - PEEK_MARGIN).max(120.0);
+    Some((
+        LogicalPosition::new(PEEK_MARGIN, y),
+        LogicalSize::new(cw, ch),
+    ))
+}
+
+/// Open a URL in the link-preview panel: a native child webview overlaid on the
+/// Messenger window (an in-window modal, not a separate OS window). A native
+/// webview loads sites that refuse iframing (Facebook, banks, ...), which an
+/// in-page iframe modal can't. Reuses the open preview if there is one (navigate
+/// and resize), else attaches a new child. `peek.js` draws the modal frame
+/// backdrop and header around it in the Messenger page.
 fn open_peek(app: &AppHandle, url: &str) {
     let target: Url = match url.parse() {
         Ok(u) => u,
         Err(_) => return,
     };
-    if let Some(win) = app.get_webview_window(PEEK_LABEL) {
-        let _ = win.navigate(target);
-        let _ = win.show();
-        let _ = win.set_focus();
+    let Some(mwin) = app.get_webview_window(MESSENGER_LABEL) else {
         return;
+    };
+    let Some((pos, size)) = peek_bounds(&mwin) else {
+        return;
+    };
+    // Reuse an already-open preview: navigate to the new target.
+    if let Some(wv) = app.get_webview(PEEK_LABEL) {
+        let _ = wv.navigate(target);
+        let _ = wv.set_focus();
+    } else {
+        // Attach a fresh child webview to the Messenger window (multiwebview; needs
+        // the tauri `unstable` feature). `peek_bounds` is only a seed size; peek.js
+        // reports the exact CSS-px rect once shown (see the `peek` host above).
+        // Only our close scheme is intercepted; every other link navigates within
+        // the preview.
+        let Some(win) = app.get_window(MESSENGER_LABEL) else {
+            return;
+        };
+        let esc_handle = app.clone();
+        let child = win.add_child(
+            WebviewBuilder::new(PEEK_LABEL, WebviewUrl::External(target))
+                .user_agent(DESKTOP_UA)
+                .initialization_script(PEEK_ESC_JS)
+                .on_navigation(move |u| {
+                    if u.scheme() == ROUTE_SCHEME {
+                        close_peek(&esc_handle);
+                        return false;
+                    }
+                    true
+                }),
+            pos,
+            size,
+        );
+        // Clip FB to the child's frame so it can't paint past the modal. All four
+        // corners rounded (a card under the header); masksToBounds does the clip.
+        #[cfg(target_os = "macos")]
+        if let Ok(child) = child {
+            let _ = child.with_webview(|pw| {
+                mask_webview(pw.inner() as *mut objc2::runtime::AnyObject, 10.0, 0);
+            });
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = child;
     }
-    let _ = WebviewWindowBuilder::new(app, PEEK_LABEL, WebviewUrl::External(target))
-        .title("Preview")
-        .inner_size(1000.0, 720.0)
-        .build();
+    // Draw the modal frame (dim backdrop + header) in the Messenger page and let
+    // it report the exact child rect. Done after the child exists so the report
+    // lands on a live webview.
+    let _ = mwin.eval(format!(
+        "window.__skPeekShow&&window.__skPeekShow({})",
+        serde_json::to_string(url).unwrap_or_default()
+    ));
+}
+
+/// Close the link-preview panel: destroy the child webview and hide its modal
+/// frame. Reached from the frame's close button / backdrop (`peek-close`) and
+/// when the window collapses to a bubble.
+pub fn close_peek(app: &AppHandle) {
+    if let Some(wv) = app.get_webview(PEEK_LABEL) {
+        let _ = wv.close();
+    }
+    if let Some(mwin) = app.get_webview_window(MESSENGER_LABEL) {
+        let _ = mwin.eval("window.__skPeekHide&&window.__skPeekHide()");
+    }
 }
 
 /// Apply a window control action signalled by the injected floating title bar.
@@ -98,6 +193,7 @@ fn window_action(app: &AppHandle, action: &str) {
         "hide" => return bubble::hide(app),
         "quit" => return bubble::quit(app),
         "menu" => return bubble::show_menu(app),
+        "peek-close" => return close_peek(app),
         _ => {}
     }
 
@@ -147,25 +243,71 @@ fn on_navigation(app: &AppHandle, url: &Url) -> bool {
         return false;
     }
 
-    // Intent signalled by the injected interceptor: route, then cancel so the
-    // custom scheme never actually loads.
-    let mut mode = String::from("peek");
+    // Geometry report from peek.js (CSS px, authoritative): size the child to it.
+    // The page measures the modal hole in its own CSS pixels, which is the only
+    // frame that always lines up with the drawn backdrop/header.
+    if url.host_str() == Some("peek") {
+        let (mut x, mut y, mut w, mut h) = (0.0, 0.0, 0.0, 0.0);
+        for (k, v) in url.query_pairs() {
+            let n = v.parse::<f64>().unwrap_or(0.0);
+            match k.as_ref() {
+                "x" => x = n,
+                "y" => y = n,
+                "w" => w = n,
+                "h" => h = n,
+                _ => {}
+            }
+        }
+        if w >= 1.0 && h >= 1.0 {
+            if let Some(wv) = app.get_webview(PEEK_LABEL) {
+                let _ = wv.set_position(LogicalPosition::new(x, y));
+                let _ = wv.set_size(LogicalSize::new(w, h));
+            }
+        }
+        return false;
+    }
+
+    // Intent signalled by the injected interceptor: `fb` marks a Facebook-family
+    // destination, the modifier flags carry the held keys, `url` is the
+    // shim-unwrapped target. Resolve to an action via the user's rules, then
+    // cancel so the custom scheme never actually loads.
+    let mut fb = false;
+    let (mut meta, mut ctrl, mut alt, mut shift) = (false, false, false, false);
     let mut target = String::new();
     for (k, v) in url.query_pairs() {
         match k.as_ref() {
-            "mode" => mode = v.into_owned(),
+            "fb" => fb = v == "1",
+            "meta" => meta = v == "1",
+            "ctrl" => ctrl = v == "1",
+            "alt" => alt = v == "1",
+            "shift" => shift = v == "1",
             "url" => target = v.into_owned(),
             _ => {}
         }
     }
     if is_web_url(&target) {
-        if mode == "browser" {
-            open_external(app, &target);
-        } else {
-            open_peek(app, &target);
-        }
+        let action =
+            crate::messenger::bubble::get_link_rules(app).resolve(fb, meta, ctrl, alt, shift);
+        route_link(app, action, &target);
     }
     false
+}
+
+/// Apply a resolved link action to a target URL.
+fn route_link(app: &AppHandle, action: crate::messenger::bubble::LinkAction, target: &str) {
+    use crate::messenger::bubble::LinkAction;
+    match action {
+        LinkAction::SystemBrowser => open_external(app, target),
+        LinkAction::ChildWebview => open_peek(app, target),
+        LinkAction::SameWindow => {
+            if let (Some(win), Ok(u)) = (
+                app.get_webview_window(MESSENGER_LABEL),
+                target.parse::<Url>(),
+            ) {
+                let _ = win.navigate(u);
+            }
+        }
+    }
 }
 
 /// Round the corners of a decorationless, transparent macOS window. CSS
@@ -193,6 +335,28 @@ fn round_corners(win: &WebviewWindow, radius: f64) {
 
 #[cfg(not(target_os = "macos"))]
 fn round_corners(_win: &WebviewWindow, _radius: f64) {}
+
+/// Round + clip a single `WKWebView`'s own layer. With multiwebview the page
+/// renders in its own `WKWebView` subview, which the window content-view mask in
+/// `round_corners` does NOT clip — so Facebook's square corners bleed past the
+/// rounded window border (and the child preview past its frame). Masking the
+/// webview's layer clips the page to the view's bounds at the compositing level.
+/// `corners` is a `CACornerMask` bitfield; `0` leaves the default (all four).
+/// macOS layer coords are bottom-left origin: bottom corners = `1 | 2 = 3`.
+#[cfg(target_os = "macos")]
+fn mask_webview(view_ptr: *mut objc2::runtime::AnyObject, radius: f64, corners: u64) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    unsafe {
+        let _: () = msg_send![view_ptr, setWantsLayer: true];
+        let layer: *mut AnyObject = msg_send![view_ptr, layer];
+        let _: () = msg_send![layer, setCornerRadius: radius];
+        if corners != 0 {
+            let _: () = msg_send![layer, setMaskedCorners: corners];
+        }
+        let _: () = msg_send![layer, setMasksToBounds: true];
+    }
+}
 
 /// Open the Messenger window, or show + focus it if it already exists. The window
 /// is created lazily on first use and, thanks to the close handler in `lib.rs`,
@@ -235,6 +399,7 @@ pub fn open_or_show(app: &AppHandle) -> Result<(), String> {
         .initialization_script(INTERCEPTOR_JS)
         .initialization_script(TITLEBAR_JS)
         .initialization_script(BUBBLE_JS)
+        .initialization_script(PEEK_JS)
         .on_navigation(move |url| on_navigation(&handle, url))
         .build()
         .map_err(|e| e.to_string())?;
@@ -242,6 +407,14 @@ pub fn open_or_show(app: &AppHandle) -> Result<(), String> {
     // fresh window at the default inner_size otherwise).
     crate::messenger::bubble::apply_saved_full_geometry(app, &win);
     round_corners(&win, 12.0);
+    // Clip the page's own WKWebView to the rounded window (the content-view mask
+    // above doesn't reach the webview subview, so FB spills past the corners).
+    #[cfg(target_os = "macos")]
+    {
+        let _ = win.with_webview(|pw| {
+            mask_webview(pw.inner() as *mut objc2::runtime::AnyObject, 12.0, 0);
+        });
+    }
 
     // Route native context-menu selections (from the bubble's right-click menu)
     // back into the bubble module.
@@ -316,14 +489,35 @@ pub fn messenger_set_muted(
     Ok(())
 }
 
+/// Read the link-routing rules so the settings page can show and edit them.
+#[tauri::command]
+pub fn messenger_get_link_rules(
+    window: WebviewWindow,
+    app: AppHandle,
+) -> Result<crate::messenger::bubble::LinkRules, String> {
+    crate::security::require_main(&window)?;
+    Ok(crate::messenger::bubble::get_link_rules(&app))
+}
+
+/// Replace the link-routing rules from the settings page and persist them.
+#[tauri::command]
+pub fn messenger_set_link_rules(
+    window: WebviewWindow,
+    app: AppHandle,
+    rules: crate::messenger::bubble::LinkRules,
+) -> Result<(), String> {
+    crate::security::require_main(&window)?;
+    crate::messenger::bubble::set_link_rules(&app, rules);
+    Ok(())
+}
+
 /// Destroy the Messenger window to reclaim its RAM (as opposed to the default
-/// close, which only hides it). Also closes the preview window if open.
+/// close, which only hides it). The preview child webview is destroyed with its
+/// parent window, but close it first so the frame state is cleared too.
 #[tauri::command]
 pub fn messenger_close(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     crate::security::require_main(&window)?;
-    if let Some(win) = app.get_webview_window(PEEK_LABEL) {
-        let _ = win.destroy();
-    }
+    close_peek(&app);
     if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
         win.destroy().map_err(|e| e.to_string())?;
     }

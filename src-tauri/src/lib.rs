@@ -1,5 +1,7 @@
+mod awsauth;
 mod devkon;
 mod github;
+mod gitmod;
 mod memtrack;
 mod messenger;
 mod security;
@@ -14,6 +16,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         // Persist the main window's size/position/maximized state across restarts.
         // Denylist the Messenger + peek windows: the bubble manages its own
         // geometry (see `messenger::bubble`), so we don't let the plugin fight it.
@@ -96,12 +99,15 @@ pub fn run() {
             messenger::commands::messenger_set_idle_secs,
             messenger::commands::messenger_get_muted,
             messenger::commands::messenger_set_muted,
+            messenger::commands::messenger_get_link_rules,
+            messenger::commands::messenger_set_link_rules,
             memtrack::commands::memory_history,
             memtrack::commands::memory_latest,
             memtrack::commands::memory_snapshot_at,
             memtrack::commands::memory_snapshot_now,
             utils::commands::cisco_status,
             utils::commands::cisco_set_enabled,
+            utils::commands::pick_directory,
             devkon::commands::devkon_list,
             devkon::commands::devkon_save,
             devkon::commands::devkon_delete,
@@ -109,6 +115,18 @@ pub fn run() {
             devkon::commands::devkon_deploy,
             devkon::commands::devkon_destroy,
             devkon::commands::devkon_status,
+            awsauth::commands::awsauth_get_config,
+            awsauth::commands::awsauth_set_config,
+            awsauth::commands::awsauth_open_brave,
+            awsauth::commands::awsauth_check_fresh,
+            awsauth::commands::awsauth_finish,
+            gitmod::commands::gitmod_get_config,
+            gitmod::commands::gitmod_set_config,
+            gitmod::commands::gitmod_status,
+            gitmod::commands::gitmod_switch,
+            gitmod::commands::gitmod_refresh_pull,
+            gitmod::commands::gitmod_switch_all,
+            gitmod::commands::gitmod_open_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

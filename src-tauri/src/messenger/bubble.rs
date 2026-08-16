@@ -26,7 +26,7 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-use crate::messenger::{MESSENGER_LABEL, PEEK_LABEL};
+use crate::messenger::MESSENGER_LABEL;
 
 /// Bubble diameter (logical px). The circle drawn by the overlay is smaller so
 /// its drop shadow has room inside the window bounds.
@@ -78,6 +78,98 @@ pub enum Mode {
     Bubble,
 }
 
+/// Where a clicked link is opened. Serialized to the settings page (and disk) in
+/// kebab-case (`same-window`, `child-webview`, `system-browser`).
+#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LinkAction {
+    /// Navigate the main Messenger webview to the link, replacing the current view.
+    SameWindow,
+    /// Open the link in the in-window preview child webview (a modal).
+    ChildWebview,
+    /// Hand the link to the user's default system browser.
+    SystemBrowser,
+}
+
+/// A modifier-combo override: when exactly these modifiers are held on the click,
+/// use `action` regardless of the destination default. An override with no
+/// modifier set never fires (that would swallow every plain click).
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct LinkOverride {
+    #[serde(default)]
+    pub meta: bool,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub alt: bool,
+    #[serde(default)]
+    pub shift: bool,
+    pub action: LinkAction,
+}
+
+impl LinkOverride {
+    fn matches(&self, meta: bool, ctrl: bool, alt: bool, shift: bool) -> bool {
+        (self.meta || self.ctrl || self.alt || self.shift)
+            && self.meta == meta
+            && self.ctrl == ctrl
+            && self.alt == alt
+            && self.shift == shift
+    }
+}
+
+/// User-editable link-routing config (Messenger settings page). Destination
+/// defaults route by whether the (shim-unwrapped) URL is a Facebook-family host;
+/// `overrides` are modifier combos that win over the default when matched.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct LinkRules {
+    pub facebook: LinkAction,
+    pub other: LinkAction,
+    pub overrides: Vec<LinkOverride>,
+}
+
+impl Default for LinkRules {
+    fn default() -> Self {
+        Self {
+            facebook: LinkAction::ChildWebview,
+            other: LinkAction::SystemBrowser,
+            // Cmd+Shift+click -> load in the same window.
+            overrides: vec![LinkOverride {
+                meta: true,
+                ctrl: false,
+                alt: false,
+                shift: true,
+                action: LinkAction::SameWindow,
+            }],
+        }
+    }
+}
+
+impl LinkRules {
+    /// Resolve the action for a click: the first matching modifier override wins
+    /// (modifiers are an explicit user intent), else the per-destination default.
+    pub fn resolve(
+        &self,
+        is_fb: bool,
+        meta: bool,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    ) -> LinkAction {
+        if let Some(o) = self
+            .overrides
+            .iter()
+            .find(|o| o.matches(meta, ctrl, alt, shift))
+        {
+            return o.action;
+        }
+        if is_fb {
+            self.facebook
+        } else {
+            self.other
+        }
+    }
+}
+
 /// Per-app bubble state, stored via `app.manage`.
 pub struct BubbleState {
     mode: Mutex<Mode>,
@@ -109,6 +201,8 @@ pub struct BubbleState {
     /// The global toggle accelerator (Tauri accelerator string). `None` until
     /// loaded from disk; falls back to `DEFAULT_SHORTCUT`. Persisted.
     shortcut: Mutex<Option<String>>,
+    /// Link-routing rules for clicks inside the Messenger webview. Persisted.
+    link_rules: Mutex<LinkRules>,
     /// Whether the persisted position/mute have been loaded from disk yet.
     loaded: AtomicBool,
     /// Keeps the most recent context menu alive while it is displayed.
@@ -131,6 +225,7 @@ impl BubbleState {
             auto_collapse_secs: AtomicU64::new(DEFAULT_IDLE_SECS),
             idle: AtomicU64::new(0),
             shortcut: Mutex::new(None),
+            link_rules: Mutex::new(LinkRules::default()),
             loaded: AtomicBool::new(false),
             menu: Mutex::new(None),
         }
@@ -291,6 +386,8 @@ pub fn enter_bubble(app: &AppHandle, smooth: bool) {
         return;
     };
     ensure_loaded(app);
+    // A link preview at bubble size would be nonsense; drop it on collapse.
+    crate::messenger::commands::close_peek(app);
     *app.state::<BubbleState>().mode.lock().unwrap() = Mode::Bubble;
 
     let muted = app.state::<BubbleState>().muted.load(Ordering::SeqCst);
@@ -518,6 +615,22 @@ pub fn set_shortcut(app: &AppHandle, accel: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The current link-routing rules, for the settings page and `on_navigation`.
+pub fn get_link_rules(app: &AppHandle) -> LinkRules {
+    ensure_loaded(app);
+    app.state::<BubbleState>()
+        .link_rules
+        .lock()
+        .unwrap()
+        .clone()
+}
+
+/// Replace the link-routing rules from the settings page and persist them.
+pub fn set_link_rules(app: &AppHandle, rules: LinkRules) {
+    *app.state::<BubbleState>().link_rules.lock().unwrap() = rules;
+    persist(app);
+}
+
 /// Register the persisted (or default) shortcut at startup.
 pub fn init_shortcut(app: &AppHandle) {
     let accel = get_shortcut(app);
@@ -569,9 +682,9 @@ pub fn hide(app: &AppHandle) {
 
 /// Destroy the Messenger (and preview) windows to reclaim RAM.
 pub fn quit(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window(PEEK_LABEL) {
-        let _ = win.destroy();
-    }
+    // Peek is a child webview of the Messenger window (torn down with its parent),
+    // but close it explicitly so its modal frame state is cleared too.
+    crate::messenger::commands::close_peek(app);
     if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
         let _ = win.destroy();
     }
@@ -671,6 +784,8 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             if let Some(win) = app.get_webview_window(MESSENGER_LABEL) {
                 remember_full_geometry(&app, &win);
             }
+            // An open link preview resizes itself: peek.js re-reports its rect on
+            // the page's own `resize` event (see commands.rs::open_peek).
         }
         WindowEvent::Moved(_) => {
             let app = window.app_handle().clone();
@@ -920,6 +1035,11 @@ fn ensure_loaded(app: &AppHandle) {
     if let Some(s) = v.get("shortcut").and_then(|s| s.as_str()) {
         *st.shortcut.lock().unwrap() = Some(s.to_string());
     }
+    if let Some(lr) = v.get("link_rules").cloned() {
+        if let Ok(rules) = serde_json::from_value::<LinkRules>(lr) {
+            *st.link_rules.lock().unwrap() = rules;
+        }
+    }
 }
 
 /// Toggle the native window shadow. On macOS a transparent window's shadow is a
@@ -955,6 +1075,7 @@ fn persist(app: &AppHandle) {
     let auto = st.auto_collapse.load(Ordering::SeqCst);
     let secs = st.auto_collapse_secs.load(Ordering::SeqCst);
     let shortcut = st.shortcut.lock().unwrap().clone();
+    let link_rules = serde_json::to_value(&*st.link_rules.lock().unwrap()).unwrap_or_default();
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -962,6 +1083,7 @@ fn persist(app: &AppHandle) {
         "muted": muted,
         "auto_collapse": auto,
         "auto_collapse_secs": secs,
+        "link_rules": link_rules,
     });
     if let Some(s) = shortcut {
         obj["shortcut"] = s.into();

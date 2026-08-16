@@ -26,11 +26,23 @@ const PR_QUERY_ROOTS = [
   "pr-checks",
 ];
 
+const TOP_BAR_KEY = "pr-top-bar-visible";
+
 function PullRequestsPage() {
   const queryClient = useQueryClient();
   const [repo, setRepo] = useState("");
   const [filters, setFilters] = useState<Filters>(makeEmptyFilters);
   const [showFilters, setShowFilters] = useState(false);
+  // Whether the repo input + Fetch + Filters row is shown. Persisted so it
+  // stays hidden across restarts once the user drives everything via views.
+  const [showTopBar, setShowTopBar] = useState(() => localStorage.getItem(TOP_BAR_KEY) !== "0");
+  const toggleTopBar = useCallback(() => {
+    setShowTopBar((v) => {
+      const next = !v;
+      localStorage.setItem(TOP_BAR_KEY, next ? "1" : "0");
+      return next;
+    });
+  }, []);
 
   // PR numbers whose row is expanded to show CI checks. Multiple may be open.
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
@@ -171,6 +183,8 @@ function PullRequestsPage() {
               activeViewId={activeViewId}
               canSaveCurrent={searchRepo.trim().length > 0}
               busy={viewsBusy}
+              topBarVisible={showTopBar}
+              onToggleTopBar={toggleTopBar}
               onApply={applyView}
               onSaveCurrent={saveCurrentAsView}
               onUpdate={updateViewToCurrent}
@@ -181,40 +195,42 @@ function PullRequestsPage() {
           headerSlot,
         )}
 
-      <div className="flex flex-col gap-3">
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <Input
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            placeholder="owner/repo"
-            className="max-w-sm"
-          />
-          <Button type="submit">Fetch</Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setShowFilters((s) => !s)}
-            aria-expanded={showFilters}
-          >
-            <SlidersHorizontal />
-            Filters
-            {activeCount > 0 && (
-              <Badge variant="secondary" className="ml-1">
-                {activeCount}
-              </Badge>
-            )}
-          </Button>
-        </form>
+      {showTopBar && (
+        <div className="flex flex-col gap-3">
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <Input
+              value={repo}
+              onChange={(e) => setRepo(e.target.value)}
+              placeholder="owner/repo"
+              className="max-w-sm"
+            />
+            <Button type="submit">Fetch</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowFilters((s) => !s)}
+              aria-expanded={showFilters}
+            >
+              <SlidersHorizontal />
+              Filters
+              {activeCount > 0 && (
+                <Badge variant="secondary" className="ml-1">
+                  {activeCount}
+                </Badge>
+              )}
+            </Button>
+          </form>
 
-        {showFilters && (
-          <PrFiltersPanel
-            filters={filters}
-            onField={setField}
-            onReset={resetFilters}
-            onApply={commit}
-          />
-        )}
-      </div>
+          {showFilters && (
+            <PrFiltersPanel
+              filters={filters}
+              onField={setField}
+              onReset={resetFilters}
+              onApply={commit}
+            />
+          )}
+        </div>
+      )}
 
       {isLoading && searchRepo && (
         <div className="flex flex-col gap-2">

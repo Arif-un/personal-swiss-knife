@@ -104,12 +104,14 @@
   document.addEventListener(
     "keydown",
     function (e) {
+      // A link preview open? Let peek.js close it on Esc instead of collapsing.
       if (
         e.key === "Escape" &&
         !e.metaKey &&
         !e.ctrlKey &&
         !e.altKey &&
         !e.shiftKey &&
+        !window.__skPeekActive &&
         window.__skMode !== "bubble"
       ) {
         e.preventDefault();

@@ -3,7 +3,9 @@ pub mod commands;
 
 /// Window label for the warm, long-lived Messenger webview.
 pub const MESSENGER_LABEL: &str = "messenger";
-/// Window label for the reusable, disposable link-preview webview.
+/// Label for the reusable, disposable link-preview child webview. It is attached
+/// to the Messenger window (multiwebview) as an in-window modal, not a separate
+/// window — see `commands::open_peek`.
 pub const PEEK_LABEL: &str = "peek";
 /// messenger.com is deprecated; the messages surface lives under facebook.com.
 pub const MESSENGER_URL: &str = "https://www.facebook.com/messages/";

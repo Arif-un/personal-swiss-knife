@@ -1,3 +1,4 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as React from "react";
 
 type Theme = "light" | "dark" | "system";
@@ -22,6 +23,8 @@ function getSystemTheme(): "light" | "dark" {
 function applyTheme(theme: Theme) {
   const resolved = theme === "system" ? getSystemTheme() : theme;
   document.documentElement.classList.toggle("dark", resolved === "dark");
+  // Sync the native window frame (titlebar / vibrancy). null = follow system.
+  void getCurrentWindow().setTheme(theme === "system" ? null : resolved);
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {

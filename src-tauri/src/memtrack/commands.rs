@@ -1,7 +1,7 @@
 //! Tauri commands backing the `/memory` page.
 
 use sysinfo::System;
-use tauri::State;
+use tauri::{Manager, State};
 
 use super::{sampler, store, MemStore, Snapshot, SnapshotSummary, MAX_SNAPSHOTS};
 
@@ -78,9 +78,10 @@ pub async fn memory_snapshot_now(
 ) -> Result<Snapshot, String> {
     crate::security::require_main(&window)?;
     let conn = store.0.clone();
+    let app = window.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut sys = System::new();
-        let snap = sampler::sample(&mut sys);
+        let snap = sampler::sample(&mut sys, &app);
         let guard = conn.lock().map_err(|e| e.to_string())?;
         let Some(conn) = guard.as_ref() else {
             return Err("memory tracking is unavailable".into());
