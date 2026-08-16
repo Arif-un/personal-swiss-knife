@@ -17,7 +17,8 @@
     "fix": "oxfmt --write src && oxlint --fix && cargo fmt --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --fix --allow-dirty --allow-staged",
     "check": "oxfmt --check src && oxlint && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "tauri": "tauri",
-    "release:mac": "bash scripts/release-mac.sh"
+    "release:mac": "bash scripts/release-mac.sh",
+    "release:linux": "bash scripts/release-linux.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
