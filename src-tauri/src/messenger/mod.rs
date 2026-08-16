@@ -1,5 +1,8 @@
 pub mod bubble;
 pub mod commands;
+mod navigate;
+mod peek;
+mod window;
 
 /// Window label for the warm, long-lived Messenger webview.
 pub const MESSENGER_LABEL: &str = "messenger";
