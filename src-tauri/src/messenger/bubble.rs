@@ -227,14 +227,28 @@ fn clamp_full(win: &WebviewWindow, r: Rect) -> Rect {
     Rect { x, y, w, h }
 }
 
+/// Open a new animation generation: mark the window as animating (so our own
+/// Moved/Resized events aren't read as user drags) and return the generation id.
+/// A newer `begin_anim` supersedes this one.
+fn begin_anim(app: &AppHandle) -> u64 {
+    let st = app.state::<BubbleState>();
+    st.animating.store(true, Ordering::SeqCst);
+    st.anim.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Clear the animating flag iff `generation` is still the latest — so a newer
+/// animation that superseded us keeps its own guard intact.
+fn end_anim(app: &AppHandle, generation: u64) {
+    let st = app.state::<BubbleState>();
+    if st.anim.load(Ordering::SeqCst) == generation {
+        st.animating.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Tween the window from `from` to `to` on a background thread. A newer call
 /// bumps `anim`, causing this thread to bail on its next step.
 fn animate(app: AppHandle, win: WebviewWindow, from: Rect, to: Rect) {
-    let generation = {
-        let st = app.state::<BubbleState>();
-        st.animating.store(true, Ordering::SeqCst);
-        st.anim.fetch_add(1, Ordering::SeqCst) + 1
-    };
+    let generation = begin_anim(&app);
     std::thread::spawn(move || {
         let start = Instant::now();
         let dur = ANIM_MS as f64;
@@ -263,26 +277,22 @@ fn animate(app: AppHandle, win: WebviewWindow, from: Rect, to: Rect) {
         }
         let _ = win.set_size(LogicalSize::new(to.w, to.h));
         let _ = win.set_position(LogicalPosition::new(to.x, to.y));
-        let st = app.state::<BubbleState>();
-        if st.anim.load(Ordering::SeqCst) == generation {
-            st.animating.store(false, Ordering::SeqCst);
-        }
+        end_anim(&app, generation);
     });
 }
 
-/// Collapse the full window into the floating bubble.
-pub fn enter_bubble(app: &AppHandle) {
+/// Collapse the full window into the floating bubble. `smooth` runs the shrink
+/// tween (manual collapse, where the window is focused and in front); when it is
+/// false the window snaps straight to the bubble. Auto-collapse fires while
+/// another app is focused, so a tween there would raise the full chat UI to the
+/// front for its duration and flash over whatever you're doing.
+pub fn enter_bubble(app: &AppHandle, smooth: bool) {
     let Some(win) = app.get_webview_window(MESSENGER_LABEL) else {
         return;
     };
     ensure_loaded(app);
     *app.state::<BubbleState>().mode.lock().unwrap() = Mode::Bubble;
 
-    let _ = win.set_always_on_top(true);
-    let _ = win.set_visible_on_all_workspaces(true);
-    // A transparent window's native shadow is a rectangle; drop it so no square
-    // halo shows behind the round bubble (the circle draws its own CSS shadow).
-    set_window_shadow(&win, false);
     let muted = app.state::<BubbleState>().muted.load(Ordering::SeqCst);
     let _ = win.eval(format!(
         "window.__skSetState&&window.__skSetState('bubble');window.__skSetMuted&&window.__skSetMuted({muted})"
@@ -300,17 +310,40 @@ pub fn enter_bubble(app: &AppHandle) {
         }
     };
     remember_pos(app, tx, ty);
-    animate(
-        app.clone(),
-        win,
-        from,
-        Rect {
-            x: tx,
-            y: ty,
-            w: BUBBLE,
-            h: BUBBLE,
-        },
-    );
+    let to = Rect {
+        x: tx,
+        y: ty,
+        w: BUBBLE,
+        h: BUBBLE,
+    };
+
+    if smooth {
+        let _ = win.set_always_on_top(true);
+        let _ = win.set_visible_on_all_workspaces(true);
+        // A transparent window's native shadow is a rectangle; drop it so no
+        // square halo shows behind the round bubble (the circle draws its own).
+        set_window_shadow(&win, false);
+        animate(app.clone(), win, from, to);
+        return;
+    }
+
+    // Instant collapse: resize to the bubble BEFORE raising to front, so an
+    // unfocused full window never pops its chat UI over the app you're using. The
+    // `animating` guard is held across the resize (as `animate` does) so the
+    // Moved/Resized events it emits aren't mistaken for a user drag, which would
+    // schedule a stray edge-snap.
+    let generation = begin_anim(app);
+    let _ = win.set_size(LogicalSize::new(to.w, to.h));
+    let _ = win.set_position(LogicalPosition::new(to.x, to.y));
+    let _ = win.set_always_on_top(true);
+    let _ = win.set_visible_on_all_workspaces(true);
+    set_window_shadow(&win, false);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // Let the async window events settle before dropping the guard.
+        std::thread::sleep(Duration::from_millis(SNAP_DEBOUNCE_MS + 40));
+        end_anim(&app, generation);
+    });
 }
 
 /// Sync the tracked mode to Full without any window animation. Called when a fresh
@@ -522,7 +555,7 @@ fn toggle(app: &AppHandle) {
     }
     let mode = *app.state::<BubbleState>().mode.lock().unwrap();
     match mode {
-        Mode::Full => enter_bubble(app),
+        Mode::Full => enter_bubble(app, true),
         Mode::Bubble => enter_full(app),
     }
 }
@@ -753,7 +786,7 @@ fn schedule_idle_collapse(app: &AppHandle) {
             if matches!(win.is_focused(), Ok(true)) {
                 return;
             }
-            enter_bubble(&app2);
+            enter_bubble(&app2, false);
         });
     });
 }

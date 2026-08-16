@@ -93,7 +93,7 @@ fn window_action(app: &AppHandle, action: &str) {
     // Bubble actions manage the window themselves (resize/destroy/menu), so they
     // don't need the window fetched up front.
     match action {
-        "collapse" => return bubble::enter_bubble(app),
+        "collapse" => return bubble::enter_bubble(app, true),
         "expand" => return bubble::expand_click(app),
         "hide" => return bubble::hide(app),
         "quit" => return bubble::quit(app),
