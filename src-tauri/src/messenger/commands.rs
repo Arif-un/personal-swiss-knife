@@ -86,22 +86,6 @@ fn open_external(app: &AppHandle, url: &str) {
     let _ = app.opener().open_url(url.to_string(), None::<&str>);
 }
 
-/// Logical (position, size) for the preview child webview: inset by `PEEK_MARGIN`
-/// on the sides and bottom, and sitting below the `PEEK_HEADER` bar at the top.
-fn peek_bounds(win: &WebviewWindow) -> Option<(LogicalPosition<f64>, LogicalSize<f64>)> {
-    let scale = win.scale_factor().ok()?;
-    let sz = win.inner_size().ok()?;
-    let w = sz.width as f64 / scale;
-    let h = sz.height as f64 / scale;
-    let y = PEEK_MARGIN + PEEK_HEADER;
-    let cw = (w - 2.0 * PEEK_MARGIN).max(120.0);
-    let ch = (h - y - PEEK_MARGIN).max(120.0);
-    Some((
-        LogicalPosition::new(PEEK_MARGIN, y),
-        LogicalSize::new(cw, ch),
-    ))
-}
-
 /// Open a URL in the link-preview panel: a native child webview overlaid on the
 /// Messenger window (an in-window modal, not a separate OS window). A native
 /// webview loads sites that refuse iframing (Facebook, banks, ...), which an
@@ -116,9 +100,10 @@ fn open_peek(app: &AppHandle, url: &str) {
     let Some(mwin) = app.get_webview_window(MESSENGER_LABEL) else {
         return;
     };
-    let Some((pos, size)) = peek_bounds(&mwin) else {
-        return;
-    };
+    // Seed geometry only: peek.js reports the exact CSS-px rect once shown and
+    // resizes the child to it, so the child never renders at this size.
+    let pos = LogicalPosition::new(PEEK_MARGIN, PEEK_MARGIN + PEEK_HEADER);
+    let size = LogicalSize::new(400.0, 400.0);
     // Reuse an already-open preview: navigate to the new target.
     if let Some(wv) = app.get_webview(PEEK_LABEL) {
         let _ = wv.navigate(target);

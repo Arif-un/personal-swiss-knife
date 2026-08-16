@@ -132,45 +132,6 @@ pub fn sample(sys: &mut System, app: &AppHandle) -> Snapshot {
         tree.extend(recovered);
     }
 
-    // ponytail: temporary diagnostic. Run with MEMTRACK_DEBUG=1 to dump every
-    // process sysinfo sees, its RSS, its responsible-pid, and whether it got
-    // counted — pinpoints why a helper (e.g. facebook.com WebContent) escapes.
-    // Remove once the missing-process bug is understood.
-    #[cfg(target_os = "macos")]
-    if std::env::var_os("MEMTRACK_DEBUG").is_some() {
-        let mut rows: Vec<(u32, u64, i32, bool, String)> = sys
-            .processes()
-            .iter()
-            .map(|(pid, p)| {
-                let rpid =
-                    unsafe { responsibility_get_pid_responsible_for_pid(pid.as_u32() as i32) };
-                (
-                    pid.as_u32(),
-                    p.memory(),
-                    rpid,
-                    tree.contains(pid),
-                    p.name().to_string_lossy().into_owned(),
-                )
-            })
-            .collect();
-        rows.sort_by_key(|b| std::cmp::Reverse(b.1));
-        eprintln!(
-            "=== MEMTRACK_DEBUG own={} ({} procs) ===",
-            own.as_u32(),
-            rows.len()
-        );
-        for (pid, rss, rpid, in_tree, name) in rows.iter().take(40) {
-            eprintln!(
-                "{:>7} rss={:>6}MB rpid={:>7} {} {}",
-                pid,
-                rss / 1_048_576,
-                rpid,
-                if *in_tree { "IN " } else { "out" },
-                name
-            );
-        }
-    }
-
     let mut processes: Vec<ProcSample> = tree
         .iter()
         .filter_map(|pid| sys.process(*pid))

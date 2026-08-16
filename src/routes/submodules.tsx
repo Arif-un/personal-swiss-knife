@@ -433,28 +433,22 @@ function SubmodulesPage() {
         </form>
       )}
 
-      {saveConfig.isError && (
-        <p className="text-sm text-destructive">
-          {errMsg(saveConfig.error, "Failed to save path")}
-        </p>
-      )}
-      {switchBranch.isError && (
-        <p className="text-sm text-destructive">
-          {errMsg(switchBranch.error, "Failed to switch branch")}
-        </p>
-      )}
-      {refreshPull.isError && (
-        <p className="text-sm text-destructive">{errMsg(refreshPull.error, "Failed to refresh")}</p>
-      )}
-      {switchAll.isError && (
-        <p className="text-sm text-destructive">
-          {errMsg(switchAll.error, "Failed to switch all")}
-        </p>
-      )}
-      {openApp.isError && (
-        <p className="text-sm text-destructive">{errMsg(openApp.error, "Failed to open app")}</p>
-      )}
-      {error && <p className="text-sm text-destructive">{errMsg(error, "Failed to read repo")}</p>}
+      {(
+        [
+          [saveConfig.isError, saveConfig.error, "Failed to save path"],
+          [switchBranch.isError, switchBranch.error, "Failed to switch branch"],
+          [refreshPull.isError, refreshPull.error, "Failed to refresh"],
+          [switchAll.isError, switchAll.error, "Failed to switch all"],
+          [openApp.isError, openApp.error, "Failed to open app"],
+          [!!error, error, "Failed to read repo"],
+        ] as const
+      )
+        .filter(([shown]) => shown)
+        .map(([, err, fallback]) => (
+          <p key={fallback} className="text-sm text-destructive">
+            {errMsg(err, fallback)}
+          </p>
+        ))}
 
       {switchAllNotes.length > 0 && (
         <ul className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">

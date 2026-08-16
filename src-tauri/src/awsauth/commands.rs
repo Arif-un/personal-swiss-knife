@@ -169,7 +169,9 @@ fn docker_running() -> bool {
     {
         return true;
     }
-    login_shell("docker info >/dev/null 2>&1")
+    Command::new("/bin/zsh")
+        .args(["-lc", "docker info >/dev/null 2>&1"])
+        .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
@@ -233,8 +235,4 @@ fn run_awsauth(repo_dir: &Path) -> Result<String, String> {
             out.status.code().unwrap_or(-1)
         ))
     }
-}
-
-fn login_shell(cmd: &str) -> std::io::Result<std::process::Output> {
-    Command::new("/bin/zsh").args(["-lc", cmd]).output()
 }
