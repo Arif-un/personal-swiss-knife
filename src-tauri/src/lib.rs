@@ -14,6 +14,14 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Persist the main window's size/position/maximized state across restarts.
+        // Denylist the Messenger + peek windows: the bubble manages its own
+        // geometry (see `messenger::bubble`), so we don't let the plugin fight it.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&[messenger::MESSENGER_LABEL, messenger::PEEK_LABEL])
+                .build(),
+        )
         // Global shortcut that toggles the Messenger window between full and
         // bubble. The combo is user-configurable (Messenger page) and registered
         // in `setup`; this only routes the keypress to the toggle handler.

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { createRoute } from "@tanstack/react-router";
 import { RefreshCw, SlidersHorizontal } from "lucide-react";
 import { rootRoute } from "./__root.tsx";
@@ -15,7 +16,18 @@ import { usePrAuxCounts, usePrViews, usePullRequests } from "#components/pull-re
 import { countActive } from "#components/pull-requests/utils.ts";
 import { makeEmptyFilters, type Filters, type PrView } from "#components/pull-requests/types.ts";
 
+// Query-key roots this page shows; Refresh invalidates all of them at once so
+// the list AND its sibling counts refetch, without a full-page reload.
+const PR_QUERY_ROOTS = [
+  "pull-requests",
+  "ci-label-counts",
+  "unresolved-comment-counts",
+  "merge-queue-status",
+  "pr-checks",
+];
+
 function PullRequestsPage() {
+  const queryClient = useQueryClient();
   const [repo, setRepo] = useState("");
   const [filters, setFilters] = useState<Filters>(makeEmptyFilters);
   const [showFilters, setShowFilters] = useState(false);
@@ -40,7 +52,6 @@ function PullRequestsPage() {
     isLoading,
     isFetching,
     error,
-    refetch,
     ciMutation,
   } = usePullRequests(searchRepo, appliedFilters);
 
@@ -113,6 +124,12 @@ function PullRequestsPage() {
     setAppliedFilters(filters);
   }, [repo, filters]);
 
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({
+      predicate: (q) => PR_QUERY_ROOTS.includes(q.queryKey[0] as string),
+    });
+  }, [queryClient]);
+
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     commit();
@@ -142,7 +159,7 @@ function PullRequestsPage() {
             <Button
               variant="ghost"
               size="icon-sm"
-              onClick={() => refetch()}
+              onClick={refresh}
               disabled={!searchRepo.trim() || isFetching}
               aria-label="Refresh"
               title="Refresh"

@@ -85,7 +85,24 @@ function PrRowImpl({
         </TableCell>
         <TableCell className="text-muted-foreground">{pr.author}</TableCell>
         <TableCell>
-          <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{pr.headRefName}</code>
+          <code
+            role="button"
+            tabIndex={0}
+            title="Click to copy branch name"
+            className="cursor-pointer rounded bg-muted px-1.5 py-0.5 text-[10px] hover:bg-muted-foreground/20"
+            onClick={(e) => {
+              e.stopPropagation();
+              void navigator.clipboard.writeText(pr.headRefName);
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              e.stopPropagation();
+              void navigator.clipboard.writeText(pr.headRefName);
+            }}
+          >
+            {pr.headRefName}
+          </code>
         </TableCell>
         <TableCell className="text-muted-foreground">{formatDate(pr.createdAt)}</TableCell>
         <TableCell className="text-center">
