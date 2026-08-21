@@ -7,6 +7,7 @@ mod messenger;
 mod security;
 mod ssh;
 mod utils;
+mod wpdeploy;
 
 use tauri::Manager;
 
@@ -127,6 +128,14 @@ pub fn run() {
             gitmod::commands::gitmod_refresh_pull,
             gitmod::commands::gitmod_switch_all,
             gitmod::commands::gitmod_open_app,
+            wpdeploy::commands::wpdeploy_config_get,
+            wpdeploy::commands::wpdeploy_config_save,
+            wpdeploy::commands::wpdeploy_config_reset,
+            wpdeploy::commands::wpdeploy_set_docroot,
+            wpdeploy::commands::wpdeploy_products,
+            wpdeploy::commands::wpdeploy_detect_docroot,
+            wpdeploy::commands::wpdeploy_deploy,
+            wpdeploy::commands::wpdeploy_rollback,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

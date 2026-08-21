@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderOpen, GitBranch, RefreshCw, Settings } from "lucide-react";
+import { FolderOpen, GitBranch, RefreshCw, Rocket, Settings } from "lucide-react";
 import { rootRoute } from "./__root.tsx";
 import { pickDirectory } from "#lib/pick-directory.ts";
 import { Input } from "#components/ui/input.tsx";
@@ -17,6 +17,12 @@ import {
   type RepoRow,
 } from "#components/submodules/api.ts";
 import { SubmoduleRow } from "#components/submodules/SubmoduleRow.tsx";
+import {
+  DeployLogSheet,
+  DeploySettings,
+  useDeploy,
+  useDeployConfigured,
+} from "#components/submodules/deploy-ui.tsx";
 
 function errMsg(e: unknown, fallback: string) {
   return typeof e === "string" ? e : e instanceof Error ? e.message : fallback;
@@ -93,6 +99,10 @@ function SubmodulesPage() {
       gitmodApi.openApp(savedPath, sub, app),
   });
 
+  const deployConfigured = useDeployConfigured();
+  const deploy = useDeploy(savedPath);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   function confirmSwitchAll() {
     setSwitchAllOpen(false);
     setSwitchAllNotes([]);
@@ -141,6 +151,23 @@ function SubmodulesPage() {
             >
               <RefreshCw className={isFetching ? "animate-spin" : undefined} />
             </Button>
+            <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Deploy settings"
+                    title="Deploy settings"
+                  >
+                    <Rocket />
+                  </Button>
+                }
+              />
+              <PopoverContent align="end" className="w-72">
+                <DeploySettings />
+              </PopoverContent>
+            </Popover>
             <Popover>
               <PopoverTrigger
                 render={
@@ -297,11 +324,26 @@ function SubmodulesPage() {
                 switching={busy}
                 onSwitch={(sub, branch, action) => switchBranch.mutate({ sub, branch, action })}
                 onOpenApp={(sub, app) => openApp.mutate({ sub, app })}
+                enviraDev={savedPath}
+                deployConfigured={deployConfigured}
+                deployBusy={deploy.running}
+                onDeploy={deploy.deploy}
+                onRollback={deploy.rollback}
+                onOpenSettings={() => setSettingsOpen(true)}
               />
             ))}
           </TableBody>
         </Table>
       )}
+
+      <DeployLogSheet
+        open={deploy.open}
+        setOpen={deploy.setOpen}
+        title={deploy.title}
+        logs={deploy.logs}
+        running={deploy.running}
+        result={deploy.result}
+      />
     </div>
   );
 }

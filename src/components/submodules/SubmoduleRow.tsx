@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "#components/ui/popover.
 import { Tooltip, TooltipContent, TooltipTrigger } from "#components/ui/tooltip.tsx";
 import { TableCell, TableRow } from "#components/ui/table.tsx";
 import { type DirtyAction, type RepoRow } from "#components/submodules/api.ts";
+import { DeployButton } from "#components/submodules/DeployButton.tsx";
 
 /** One repo row. The branch cell is a searchable dropdown that confirms the switch inline. */
 export function SubmoduleRow({
@@ -17,12 +18,24 @@ export function SubmoduleRow({
   onSwitch,
   onOpenApp,
   switching,
+  enviraDev,
+  deployConfigured,
+  deployBusy,
+  onDeploy,
+  onRollback,
+  onOpenSettings,
 }: {
   row: RepoRow;
   rootName: string;
   onSwitch: (sub: string, branch: string, action: DirtyAction) => void;
   onOpenApp: (sub: string, app: "github" | "vscode" | "terminal") => void;
   switching: boolean;
+  enviraDev: string;
+  deployConfigured: boolean;
+  deployBusy: boolean;
+  onDeploy: (slug: string, build: boolean) => void;
+  onRollback: (slug: string) => void;
+  onOpenSettings: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -231,6 +244,17 @@ export function SubmoduleRow({
             />
             <TooltipContent>Open in Terminal</TooltipContent>
           </Tooltip>
+          {!row.isParent && enviraDev.trim() && (
+            <DeployButton
+              repo={row.name}
+              enviraDev={enviraDev}
+              configured={deployConfigured}
+              busy={deployBusy}
+              onDeploy={onDeploy}
+              onRollback={onRollback}
+              onOpenSettings={onOpenSettings}
+            />
+          )}
         </div>
       </TableCell>
     </TableRow>
