@@ -143,9 +143,11 @@ export function ViewsMenu({
                       view.id === activeViewId ? "opacity-100" : "opacity-0",
                     )}
                   />
-                  <span className="min-w-0 flex-1 truncate">{view.name}</span>
-                  <span className="shrink-0 truncate text-xs text-muted-foreground">
-                    {view.repo}
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">{view.name}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {view.repo}
+                    </span>
                   </span>
                 </button>
                 <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/view:opacity-100">
