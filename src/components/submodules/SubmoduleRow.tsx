@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronsUpDown, GitBranch, Terminal } from "lucide-react";
-import { FaGithub } from "react-icons/fa";
-import { VscVscode } from "react-icons/vsc";
+import { FiGithub } from "react-icons/fi";
+import { VscVscodeOutline } from "react-icons/vsc";
 import { Input } from "#components/ui/input.tsx";
 import { Button } from "#components/ui/button.tsx";
 import { Badge } from "#components/ui/badge.tsx";
@@ -208,7 +208,7 @@ export function SubmoduleRow({
                   onClick={() => onOpenApp(sub, "github")}
                   aria-label="Open in GitHub Desktop"
                 >
-                  <FaGithub />
+                  <FiGithub />
                 </Button>
               }
             />
@@ -223,7 +223,7 @@ export function SubmoduleRow({
                   onClick={() => onOpenApp(sub, "vscode")}
                   aria-label="Open in VS Code"
                 >
-                  <VscVscode />
+                  <VscVscodeOutline />
                 </Button>
               }
             />
