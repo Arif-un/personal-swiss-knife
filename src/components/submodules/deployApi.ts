@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type Event } from "@tauri-apps/api/event";
-import type { Host } from "#components/ssh/types.ts";
 
 /** Persisted deploy settings (mirrors backend `WpDeployConfig`). */
 export interface WpDeployConfig {
@@ -46,7 +45,6 @@ export const wpDeployApi = {
     invoke<void>("wpdeploy_deploy", { enviraDev, slug, build, deployId }),
   rollback: (slug: string, deployId: string) =>
     invoke<void>("wpdeploy_rollback", { slug, deployId }),
-  hostsList: () => invoke<Host[]>("hosts_list"),
 };
 
 /** Tauri event channels emitted by the deploy backend. */
@@ -62,7 +60,5 @@ export const wpDeployEvents = {
 
 export const wpDeployKeys = {
   config: () => ["wpdeploy", "config"] as const,
-  hosts: () => ["wpdeploy", "hosts"] as const,
-  products: (enviraDev: string, repo: string) =>
-    ["wpdeploy", "products", enviraDev, repo] as const,
+  products: (enviraDev: string, repo: string) => ["wpdeploy", "products", enviraDev, repo] as const,
 };

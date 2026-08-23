@@ -22,7 +22,7 @@ struct Group {
 type Groups = BTreeMap<String, Group>;
 
 /// The theme product is not in product-slugs.json (it lives in the theme repo).
-const THEME_SLUG: &str = "imagely-theme";
+pub const THEME_SLUG: &str = "imagely-theme";
 
 fn slugs_path(envira_dev: &str) -> std::path::PathBuf {
     Path::new(envira_dev).join("dev/utils/src/product-slugs.json")

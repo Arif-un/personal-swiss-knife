@@ -5,6 +5,7 @@ import { Button } from "#components/ui/button.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "#components/ui/popover.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#components/ui/tooltip.tsx";
 import { wpDeployApi, wpDeployKeys } from "#components/submodules/deployApi.ts";
+import { sshApi, sshKeys } from "#components/ssh/api.ts";
 
 /**
  * Per-repo deploy control. Loads the repo's deployable products; repos with no
@@ -30,6 +31,12 @@ export function DeployButton({
 }) {
   const [open, setOpen] = useState(false);
   const [build, setBuild] = useState(false);
+  // A pending deploy/rollback awaiting confirmation — deploy overwrites a live
+  // site with --force, so it is gated behind an explicit second click that also
+  // names the target host (below), rather than firing straight from one tap.
+  const [pending, setPending] = useState<{ kind: "deploy" | "rollback"; slug: string } | null>(
+    null,
+  );
 
   const { data: products } = useQuery({
     queryKey: wpDeployKeys.products(enviraDev, repo),
@@ -37,6 +44,16 @@ export function DeployButton({
     enabled: enviraDev.trim().length > 0,
     staleTime: Infinity,
   });
+  const { data: config } = useQuery({
+    queryKey: wpDeployKeys.config(),
+    queryFn: wpDeployApi.configGet,
+  });
+  const { data: hosts } = useQuery({
+    queryKey: sshKeys.hosts(),
+    queryFn: sshApi.hostsList,
+  });
+  const targetHost = hosts?.find((h) => h.id === config?.targetHostId);
+  const hostLabel = targetHost ? targetHost.alias || targetHost.hostname : "the target host";
 
   // Repo ships nothing deployable → no icon.
   if (products && products.length === 0) return null;
@@ -45,17 +62,23 @@ export function DeployButton({
   // build during the zip step, so the toggle is irrelevant there.
   const buildable = !!products && ["envira", "soliloquy", "cdn"].includes(products[0]?.group);
 
-  function deploy(slug: string) {
+  function confirmPending() {
+    if (!pending) return;
+    const p = pending;
+    setPending(null);
     setOpen(false);
-    onDeploy(slug, buildable && build);
-  }
-  function rollback(slug: string) {
-    setOpen(false);
-    onRollback(slug);
+    if (p.kind === "deploy") onDeploy(p.slug, buildable && build);
+    else onRollback(p.slug);
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setPending(null);
+      }}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
@@ -88,9 +111,37 @@ export function DeployButton({
           </div>
         ) : !products ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : pending ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm font-medium">
+              {pending.kind === "deploy" ? "Deploy" : "Roll back"}{" "}
+              <span className="font-mono">{pending.slug}</span>?
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {pending.kind === "deploy"
+                ? `Overwrites the live plugin/theme on ${hostLabel}.`
+                : `Restores the last backup on ${hostLabel}.`}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1"
+                onClick={() => setPending(null)}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" className="flex-1" onClick={confirmPending}>
+                Confirm
+              </Button>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col gap-3">
             <p className="text-sm font-medium">Build &amp; deploy</p>
+            <p className="text-xs text-muted-foreground">
+              Target: <span className="font-mono">{hostLabel}</span>
+            </p>
 
             {buildable ? (
               <label className="flex items-start gap-2 text-sm">
@@ -115,7 +166,12 @@ export function DeployButton({
 
             {products.length === 1 ? (
               <div className="flex items-center gap-2">
-                <Button size="sm" className="flex-1" disabled={busy} onClick={() => deploy(products[0].slug)}>
+                <Button
+                  size="sm"
+                  className="flex-1"
+                  disabled={busy}
+                  onClick={() => setPending({ kind: "deploy", slug: products[0].slug })}
+                >
                   <Rocket className="size-3.5" />
                   Deploy {products[0].slug}
                 </Button>
@@ -125,7 +181,7 @@ export function DeployButton({
                   disabled={busy}
                   aria-label="Rollback"
                   title="Rollback to last backup"
-                  onClick={() => rollback(products[0].slug)}
+                  onClick={() => setPending({ kind: "rollback", slug: products[0].slug })}
                 >
                   <RotateCcw />
                 </Button>
@@ -140,7 +196,11 @@ export function DeployButton({
                     <span className="min-w-0 flex-1 truncate font-mono text-xs" title={p.slug}>
                       {p.slug}
                     </span>
-                    <Button size="sm" disabled={busy} onClick={() => deploy(p.slug)}>
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => setPending({ kind: "deploy", slug: p.slug })}
+                    >
                       Deploy
                     </Button>
                     <Button
@@ -149,7 +209,7 @@ export function DeployButton({
                       disabled={busy}
                       aria-label="Rollback"
                       title="Rollback to last backup"
-                      onClick={() => rollback(p.slug)}
+                      onClick={() => setPending({ kind: "rollback", slug: p.slug })}
                     >
                       <RotateCcw />
                     </Button>

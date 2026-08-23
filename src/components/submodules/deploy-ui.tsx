@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, FolderOpen, Loader2 } from "lucide-react";
 import { pickDirectory } from "#lib/pick-directory.ts";
+import { sshApi, sshKeys } from "#components/ssh/api.ts";
 import { Button } from "#components/ui/button.tsx";
 import { Input } from "#components/ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "#components/ui/popover.tsx";
@@ -13,6 +14,11 @@ import {
   type DoneEvent,
   type LogLine,
 } from "#components/submodules/deployApi.ts";
+
+/** Cap on retained log lines. A build (esp. "Build assets first") can stream
+ *  thousands of lines; keeping only a tail bounds the per-line array copy and the
+ *  full re-grouping/scroll the log sheet does on every update. */
+const MAX_LOG_LINES = 5000;
 
 /** Deploy orchestration: owns the running deploy's id, streamed logs, and the
  *  log-sheet open state. Subscribes once to the backend event channels. */
@@ -26,7 +32,15 @@ export function useDeploy(enviraDev: string) {
 
   useEffect(() => {
     const un1 = wpDeployEvents.onLog((e) => {
-      if (e.payload.deployId === idRef.current) setLogs((l) => [...l, e.payload]);
+      if (e.payload.deployId === idRef.current)
+        setLogs((l) => {
+          if (l.length < MAX_LOG_LINES) return [...l, e.payload];
+          // Over cap: evict the oldest body ("out"/"err") line, keeping "step"/
+          // "time" markers so the sheet's section headers survive long streams.
+          const i = l.findIndex((x) => x.stream === "out" || x.stream === "err");
+          const base = i >= 0 ? [...l.slice(0, i), ...l.slice(i + 1)] : l.slice(1);
+          return [...base, e.payload];
+        });
     });
     const un2 = wpDeployEvents.onDone((e) => {
       if (e.payload.deployId === idRef.current) {
@@ -168,8 +182,8 @@ export function DeploySettings() {
     queryFn: wpDeployApi.configGet,
   });
   const { data: hosts } = useQuery({
-    queryKey: wpDeployKeys.hosts(),
-    queryFn: wpDeployApi.hostsList,
+    queryKey: sshKeys.hosts(),
+    queryFn: sshApi.hostsList,
   });
 
   const [hostId, setHostId] = useState("");
@@ -192,12 +206,17 @@ export function DeploySettings() {
       return cfg;
     },
     onSuccess: (cfg) => qc.setQueryData(wpDeployKeys.config(), cfg),
+    // If the second write failed after the first persisted, the cache is stale
+    // vs what's on disk — refetch so configured-state reflects reality.
+    onError: () => qc.invalidateQueries({ queryKey: wpDeployKeys.config() }),
   });
 
   const detect = useMutation({
     mutationFn: (id: string) => wpDeployApi.detectDocroot(id),
-    onSuccess: (cands) => {
-      if (cands.length > 0) setDocroot(cands[0]);
+    // Ignore a slow scan that resolves after the user picked a different host,
+    // so its docroot can't overwrite the now-selected host's field.
+    onSuccess: (cands, id) => {
+      if (id === hostId && cands.length > 0) setDocroot(cands[0]);
     },
   });
 
@@ -317,7 +336,13 @@ export function DeploySettings() {
             placeholder="~/wp-deploy-zips"
             className="h-8 text-sm"
           />
-          <Button type="button" size="icon-sm" variant="outline" onClick={browse} aria-label="Browse">
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="outline"
+            onClick={browse}
+            aria-label="Browse"
+          >
             <FolderOpen />
           </Button>
         </div>

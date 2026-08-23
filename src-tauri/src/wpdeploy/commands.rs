@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 use crate::ssh::{config as ssh_config, current_user, expand_tilde, Host, HostSource};
 
-use super::products::{products_for_repo, resolve_slug};
+use super::products::{products_for_repo, resolve_slug, THEME_SLUG};
 use super::{DoneEvent, LogLine, Product, WpDeployConfig, EVENT_DONE, EVENT_LOG};
 
 // ------------------------------------------------------------------ config store
@@ -66,12 +66,13 @@ fn find_host(app: &AppHandle, id: &str) -> Result<Host, String> {
 }
 
 // ------------------------------------------------------------------ ssh/scp plumbing
-/// Shared ssh/scp options: accept a new host key (never block on a prompt) and a
-/// sane connect timeout.
-const SSH_COMMON: [&str; 2] = [
-    "-o StrictHostKeyChecking=accept-new",
-    "-o ConnectTimeout=15",
-];
+/// Shared ssh/scp options: strict host-key checking (refuse an unknown or changed
+/// key instead of silently trusting it) and a sane connect timeout. Trust is
+/// established once via the SSH page — russh TOFU writes `~/.ssh/known_hosts`,
+/// which system `ssh`/`scp` read here — so a host you've connected to there
+/// deploys strictly, and an unverified host fails with a clear host-key error
+/// rather than a silent accept. This matches the rest of the app's SSH policy.
+const SSH_COMMON: [&str; 2] = ["-o StrictHostKeyChecking=yes", "-o ConnectTimeout=15"];
 
 /// The `user@host` (app host) or bare alias (ssh-config host) target.
 fn target(host: &Host) -> String {
@@ -228,7 +229,12 @@ fn run_streaming(
     let _ = h_err.join();
     let out = acc.lock().unwrap().clone();
     if status.success() {
-        emit_log(app, deploy_id, "time", &format!("{:.1}s", started.elapsed().as_secs_f64()));
+        emit_log(
+            app,
+            deploy_id,
+            "time",
+            &format!("{:.1}s", started.elapsed().as_secs_f64()),
+        );
         Ok(out)
     } else {
         Err(format!("{step}: command failed"))
@@ -263,8 +269,46 @@ fn ssh_ok(host: &Host, remote_cmd: &str) -> bool {
 
 fn sanitize(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
+}
+
+/// Reject a slug/theme-dir name that could break out of a remote shell command or
+/// path (anything outside `[A-Za-z0-9._-]`, or a `..` traversal). Deploy also
+/// membership-checks via `resolve_slug`; this closes the charset gap and guards
+/// the rollback path, which does not run `resolve_slug`.
+fn ensure_safe_slug(slug: &str) -> Result<(), String> {
+    let ok = !slug.is_empty()
+        && slug != "."
+        && !slug.contains("..")
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("invalid product slug: {slug}"))
+    }
+}
+
+/// Top-level directory inside a zip (the dir `wp theme install` unpacks to).
+/// Best-effort: `None` if `unzip` is unavailable or the zip is unreadable.
+fn zip_top_dir(zip: &Path) -> Option<String> {
+    let mut c = Command::new("unzip");
+    c.arg("-Z1").arg(zip).env("PATH", child_path());
+    let out = run_capture(c).ok()?;
+    let top = out.lines().next()?.split('/').next()?.trim();
+    if top.is_empty() {
+        None
+    } else {
+        Some(top.to_string())
+    }
 }
 
 // ------------------------------------------------------------------ deploy build helpers
@@ -274,11 +318,19 @@ fn build_command_for(envira_dev: &str, group: &str, is_lite: bool) -> Option<Com
     let mut c = Command::new("yarn");
     match group {
         "envira" => {
-            c.args(if is_lite { ["envira-lite", "build"] } else { ["envira", "build"] });
+            c.args(if is_lite {
+                ["envira-lite", "build"]
+            } else {
+                ["envira", "build"]
+            });
             c.current_dir(envira_dev);
         }
         "soliloquy" => {
-            c.args(if is_lite { ["sol-lite", "build"] } else { ["sol", "build"] });
+            c.args(if is_lite {
+                ["sol-lite", "build"]
+            } else {
+                ["sol", "build"]
+            });
             c.current_dir(envira_dev);
         }
         "cdn" => {
@@ -417,6 +469,7 @@ fn run_deploy(
         return Err("envira-dev path not set (top of Submodules page)".into());
     }
     let (group, is_lite) = resolve_slug(envira_dev, slug)?;
+    ensure_safe_slug(slug)?;
     let cfg = load_config(app)?;
     if cfg.zip_base.trim().is_empty() {
         return Err("zip base dir not set — configure it in deploy settings".into());
@@ -432,7 +485,12 @@ fn run_deploy(
         .filter(|d| !d.trim().is_empty())
         .ok_or("no docroot set for the target host — configure it in deploy settings")?;
 
-    emit_log(app, deploy_id, "step", &format!("Target: {} ({docroot})", target(&host)));
+    emit_log(
+        app,
+        deploy_id,
+        "step",
+        &format!("Target: {} ({docroot})", target(&host)),
+    );
     let rhome = run_capture(ssh_command(&host, "echo $HOME"))?;
     let rhome = rhome.trim();
     if rhome.is_empty() {
@@ -449,8 +507,19 @@ fn run_deploy(
     }
 
     // 2. Zip via envira-dev's own pipeline (single source of truth).
-    let out_dir = Path::new(&cfg.zip_base).join(&group);
-    std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
+    let out_dir = expand_tilde(&cfg.zip_base).join(&group);
+    std::fs::create_dir_all(&out_dir)
+        .map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
+    // Clear stale zips: the theme branch below globs every *.zip in out_dir, so a
+    // zip left from a prior run (e.g. a brand no longer built) would otherwise be
+    // re-installed onto the live site. All zips here are rebuilt by the step below.
+    if let Ok(entries) = std::fs::read_dir(&out_dir) {
+        for p in entries.flatten().map(|e| e.path()) {
+            if p.extension().is_some_and(|x| x == "zip") {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
     let mut zip_cmd = Command::new("yarn");
     zip_cmd
         .args(["actions", "zip", slug])
@@ -499,16 +568,25 @@ fn run_deploy(
         )?;
 
         if group == "theme" {
+            // Best-effort restore point before force-overwriting the live theme.
+            backup_theme(app, deploy_id, &host, &docroot, &backups_root, zip)?;
             run_streaming(
                 app,
                 deploy_id,
                 "Installing theme (--force)",
                 ssh_command(
                     &host,
-                    &format!("cd {} && wp theme install {} --force", shq(&docroot), shq(&remote_zip)),
+                    &format!(
+                        "cd {} && wp theme install {} --force",
+                        shq(&docroot),
+                        shq(&remote_zip)
+                    ),
                 ),
             )?;
-            let _ = run_capture(ssh_command(&host, &format!("cd {} && wp cache flush", shq(&docroot))));
+            let _ = run_capture(ssh_command(
+                &host,
+                &format!("cd {} && wp cache flush", shq(&docroot)),
+            ));
         } else {
             // 4. Backup existing plugin (rotate, keep last 2).
             backup_plugin(app, deploy_id, &host, &docroot, &backups_root, slug)?;
@@ -519,24 +597,40 @@ fn run_deploy(
                 &format!("Installing {slug} (--force)"),
                 ssh_command(
                     &host,
-                    &format!("cd {} && wp plugin install {} --force", shq(&docroot), shq(&remote_zip)),
+                    &format!(
+                        "cd {} && wp plugin install {} --force",
+                        shq(&docroot),
+                        shq(&remote_zip)
+                    ),
                 ),
             )?;
             // 6. Activate if inactive.
-            let is_active = ssh_ok(&host, &format!("cd {} && wp plugin is-active {slug}", shq(&docroot)));
+            let is_active = ssh_ok(
+                &host,
+                &format!("cd {} && wp plugin is-active {slug}", shq(&docroot)),
+            );
             if !is_active {
                 run_streaming(
                     app,
                     deploy_id,
                     &format!("Activating {slug}"),
-                    ssh_command(&host, &format!("cd {} && wp plugin activate {slug}", shq(&docroot))),
+                    ssh_command(
+                        &host,
+                        &format!("cd {} && wp plugin activate {slug}", shq(&docroot)),
+                    ),
                 )?;
             }
             // 7. Cache flush + version read (best-effort).
-            let _ = run_capture(ssh_command(&host, &format!("cd {} && wp cache flush", shq(&docroot))));
+            let _ = run_capture(ssh_command(
+                &host,
+                &format!("cd {} && wp cache flush", shq(&docroot)),
+            ));
             version = run_capture(ssh_command(
                 &host,
-                &format!("cd {} && wp plugin get {slug} --field=version", shq(&docroot)),
+                &format!(
+                    "cd {} && wp plugin get {slug} --field=version",
+                    shq(&docroot)
+                ),
             ))
             .ok()
             .filter(|v| !v.is_empty());
@@ -550,6 +644,42 @@ fn run_deploy(
     Ok(version)
 }
 
+/// Per-host backup dir, `{backups_root}/{alias}`.
+fn backups_dir(backups_root: &str, host: &Host) -> String {
+    format!("{backups_root}/{}", sanitize(&host.alias))
+}
+
+/// Tar `dir` (a dir directly under `parent`) into the backup subdir
+/// `{backups_root}/{alias}/{key}/{ts}.tar.gz` and rotate that subdir to the newest
+/// 2. `key` is a per-item subdir (not a flat `{dir}-*` glob), which keeps a name
+/// that is a prefix of a sibling (`envira-gallery` vs `envira-gallery-lite`) from
+/// matching — and deleting/restoring — the sibling's archives. `key` is usually
+/// the same as `dir` (plugins) but namespaced for themes (`themes/{brand}`) so
+/// rollback can find theme backups separately. `dir` must have passed
+/// `ensure_safe_slug`. `ts` is nanoseconds so same-second re-deploys don't collide.
+fn tar_backup(
+    host: &Host,
+    backups_root: &str,
+    parent: &str,
+    dir: &str,
+    key: &str,
+) -> Result<(), String> {
+    let sdir = format!("{}/{key}", backups_dir(backups_root, host));
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let cmd = format!(
+        "mkdir -p {s} && tar czf {s}/{ts}.tar.gz -C {p} {nm} && \
+         ls -1t {s}/*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f",
+        s = shq(&sdir),
+        p = shq(parent),
+        nm = shq(dir),
+    );
+    run_capture(ssh_command(host, &cmd))?;
+    Ok(())
+}
+
 fn backup_plugin(
     app: &AppHandle,
     deploy_id: &str,
@@ -559,30 +689,114 @@ fn backup_plugin(
     slug: &str,
 ) -> Result<(), String> {
     let plugdir = format!("{docroot}/wp-content/plugins/{slug}");
+    // `... && echo yes || echo no` exits 0 whether or not the dir exists, so a
+    // non-zero exit means the ssh probe itself failed — propagate it (`?`) rather
+    // than treating a transient failure as "no existing install" and skipping the
+    // backup right before a `--force` overwrite.
     let exists = run_capture(ssh_command(
         host,
-        &format!("test -d {} && echo yes", shq(&plugdir)),
-    ))
-    .unwrap_or_default();
+        &format!("test -d {} && echo yes || echo no", shq(&plugdir)),
+    ))?;
     if !exists.contains("yes") {
-        emit_log(app, deploy_id, "step", &format!("No existing {slug} — first install, no backup"));
+        emit_log(
+            app,
+            deploy_id,
+            "step",
+            &format!("No existing {slug} — first install, no backup"),
+        );
         return Ok(());
     }
     emit_log(app, deploy_id, "step", &format!("Backing up {slug}"));
-    let bdir = format!("{backups_root}/{}", sanitize(&host.alias));
     let plugins = format!("{docroot}/wp-content/plugins");
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let cmd = format!(
-        "mkdir -p {b} && tar czf {b}/{slug}-{ts}.tar.gz -C {p} {slug} && \
-         ls -1t {b}/{slug}-*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f",
-        b = shq(&bdir),
-        p = shq(&plugins),
-    );
-    run_capture(ssh_command(host, &cmd))?;
-    Ok(())
+    tar_backup(host, backups_root, &plugins, slug, slug)
+}
+
+/// Best-effort restore point for a theme before `wp theme install --force`.
+/// The theme dir is derived from the zip; if it can't be read or the theme is a
+/// first install, no backup is taken (logged, deploy continues unchanged).
+fn backup_theme(
+    app: &AppHandle,
+    deploy_id: &str,
+    host: &Host,
+    docroot: &str,
+    backups_root: &str,
+    zip: &Path,
+) -> Result<(), String> {
+    let Some(name) = zip_top_dir(zip) else {
+        emit_log(
+            app,
+            deploy_id,
+            "step",
+            "Could not read theme zip — skipping backup",
+        );
+        return Ok(());
+    };
+    if ensure_safe_slug(&name).is_err() {
+        emit_log(
+            app,
+            deploy_id,
+            "step",
+            &format!("Unexpected theme dir name {name} — skipping backup"),
+        );
+        return Ok(());
+    }
+    let themes = format!("{docroot}/wp-content/themes");
+    // See backup_plugin: `|| echo no` keeps the probe exit 0 so a non-zero exit is
+    // a real ssh failure and aborts before the `--force` overwrite.
+    let exists = run_capture(ssh_command(
+        host,
+        &format!(
+            "test -d {} && echo yes || echo no",
+            shq(&format!("{themes}/{name}"))
+        ),
+    ))?;
+    if !exists.contains("yes") {
+        emit_log(
+            app,
+            deploy_id,
+            "step",
+            &format!("No existing theme {name} — first install, no backup"),
+        );
+        return Ok(());
+    }
+    emit_log(app, deploy_id, "step", &format!("Backing up theme {name}"));
+    tar_backup(
+        host,
+        backups_root,
+        &themes,
+        &name,
+        &format!("themes/{name}"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_safe_slug;
+
+    #[test]
+    fn safe_slugs_pass_injection_and_traversal_fail() {
+        for ok in [
+            "envira-gallery",
+            "imagely-theme",
+            "soliloquy-css",
+            "envira_pro.1",
+        ] {
+            assert!(ensure_safe_slug(ok).is_ok(), "{ok} should be allowed");
+        }
+        for bad in [
+            "",
+            ".",
+            "..",
+            "a/b",
+            "x; rm -rf ~",
+            "x $(id)",
+            "foo bar",
+            "a*b",
+            "../evil",
+        ] {
+            assert!(ensure_safe_slug(bad).is_err(), "{bad} should be rejected");
+        }
+    }
 }
 
 /// Restore the newest backup for a plugin on the target host, then reactivate.
@@ -606,7 +820,49 @@ pub async fn wpdeploy_rollback(
     .map_err(|e| e.to_string())?
 }
 
+/// Restore the newest backup of `dir` (kept under `bk_subdir`) into `parent`.
+/// Returns `Ok(false)` when there is no backup to restore. Extraction lands in a
+/// temp dir on the same filesystem and the live dir is removed only after the
+/// expected `dir` is confirmed present in the archive — so a corrupt/truncated OR
+/// valid-but-wrong-contents backup fails before anything is deleted, then an
+/// atomic mv swaps it in. `dir` must have passed `ensure_safe_slug`.
+fn restore_newest(
+    app: &AppHandle,
+    deploy_id: &str,
+    host: &Host,
+    parent: &str,
+    bk_subdir: &str,
+    dir: &str,
+) -> Result<bool, String> {
+    let newest = run_capture(ssh_command(
+        host,
+        &format!("ls -1t {}/*.tar.gz 2>/dev/null | head -1", shq(bk_subdir)),
+    ))?;
+    let newest = newest.trim();
+    if newest.is_empty() {
+        return Ok(false);
+    }
+    emit_log(app, deploy_id, "step", &format!("Restoring {newest}"));
+    run_streaming(
+        app,
+        deploy_id,
+        &format!("Rolling back {dir}"),
+        ssh_command(
+            host,
+            &format!(
+                "tmp=$(mktemp -d {p}/.wp-rollback-XXXXXX) && trap 'rm -rf \"$tmp\"' EXIT && \
+                 tar xzf {n} -C \"$tmp\" && test -d \"$tmp\"/{d} && rm -rf {p}/{d} && mv \"$tmp\"/{d} {p}/{d}",
+                p = shq(parent),
+                n = shq(newest),
+                d = shq(dir),
+            ),
+        ),
+    )?;
+    Ok(true)
+}
+
 fn run_rollback(app: &AppHandle, slug: &str, deploy_id: &str) -> Result<(), String> {
+    ensure_safe_slug(slug)?;
     let cfg = load_config(app)?;
     if cfg.target_host_id.trim().is_empty() {
         return Err("no target host selected".into());
@@ -620,33 +876,57 @@ fn run_rollback(app: &AppHandle, slug: &str, deploy_id: &str) -> Result<(), Stri
         .ok_or("no docroot set for the target host")?;
     let rhome = run_capture(ssh_command(&host, "echo $HOME"))?;
     let backups_root = format!("{}/.wp-deploy-backups", rhome.trim());
-    let bdir = format!("{backups_root}/{}", sanitize(&host.alias));
+    let bdir = backups_dir(&backups_root, &host);
 
-    let newest = run_capture(ssh_command(
-        &host,
-        &format!("ls -1t {}/{slug}-*.tar.gz 2>/dev/null | head -1", bdir),
-    ))?;
-    let newest = newest.trim();
-    if newest.is_empty() {
+    // Themes install into wp-content/themes (one dir per brand, backed up under
+    // `{bdir}/themes/{brand}`) and the deploy never activates them — so roll each
+    // backed-up brand back into themes and flush, no `wp theme activate`.
+    if slug == THEME_SLUG {
+        let themes = format!("{docroot}/wp-content/themes");
+        let root = format!("{bdir}/themes");
+        let listing = run_capture(ssh_command(
+            &host,
+            &format!("ls -1 {}/ 2>/dev/null", shq(&root)),
+        ))
+        .unwrap_or_default();
+        let mut restored = false;
+        for brand in listing
+            .lines()
+            .map(|l| l.trim().trim_end_matches('/'))
+            .filter(|l| !l.is_empty())
+        {
+            if ensure_safe_slug(brand).is_err() {
+                continue;
+            }
+            let sub = format!("{root}/{brand}");
+            if restore_newest(app, deploy_id, &host, &themes, &sub, brand)? {
+                restored = true;
+            }
+        }
+        if !restored {
+            return Err("no theme backup found on this host".into());
+        }
+        let _ = run_capture(ssh_command(
+            &host,
+            &format!("cd {} && wp cache flush", shq(&docroot)),
+        ));
+        emit_log(app, deploy_id, "step", "Done");
+        return Ok(());
+    }
+
+    let plugins = format!("{docroot}/wp-content/plugins");
+    let sub = format!("{bdir}/{slug}");
+    if !restore_newest(app, deploy_id, &host, &plugins, &sub, slug)? {
         return Err(format!("no backup found for {slug} on this host"));
     }
-    emit_log(app, deploy_id, "step", &format!("Restoring {newest}"));
-    let plugins = format!("{docroot}/wp-content/plugins");
-    run_streaming(
-        app,
-        deploy_id,
-        &format!("Rolling back {slug}"),
-        ssh_command(
-            &host,
-            &format!(
-                "rm -rf {p}/{slug} && tar xzf {n} -C {p}",
-                p = shq(&plugins),
-                n = shq(newest),
-            ),
-        ),
-    )?;
-    let _ = run_capture(ssh_command(&host, &format!("cd {} && wp plugin activate {slug}", shq(&docroot))));
-    let _ = run_capture(ssh_command(&host, &format!("cd {} && wp cache flush", shq(&docroot))));
+    let _ = run_capture(ssh_command(
+        &host,
+        &format!("cd {} && wp plugin activate {slug}", shq(&docroot)),
+    ));
+    let _ = run_capture(ssh_command(
+        &host,
+        &format!("cd {} && wp cache flush", shq(&docroot)),
+    ));
     emit_log(app, deploy_id, "step", "Done");
     Ok(())
 }
