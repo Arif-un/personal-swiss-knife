@@ -40,7 +40,6 @@ export function PrTable({
             <TableHead className="w-16">#</TableHead>
             <TableHead>Title</TableHead>
             <TableHead className="w-32">Author</TableHead>
-            <TableHead className="w-32">Branch</TableHead>
             <TableHead className="w-28">Date</TableHead>
             <TableHead className="w-12 text-center">CI</TableHead>
           </TableRow>
@@ -48,7 +47,7 @@ export function PrTable({
         <TableBody>
           {prs.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
+              <TableCell colSpan={5} className="text-center text-muted-foreground">
                 No pull requests match these filters.
               </TableCell>
             </TableRow>

@@ -43,6 +43,8 @@ export interface PullRequest {
   /** Raw gh state, e.g. OPEN / CLOSED / MERGED (compared case-insensitively). */
   state: string;
   labels: string[];
+  /** gh reviewDecision: APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED / "". */
+  reviewDecision: string;
 }
 
 /** `gh pr checks` outcome buckets we render distinctly; other values fall back

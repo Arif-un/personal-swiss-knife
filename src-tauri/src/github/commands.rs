@@ -85,7 +85,10 @@ pub async fn fetch_pull_requests(
         );
 
         args.push("--json".into());
-        args.push("number,title,author,createdAt,url,isDraft,headRefName,state,labels".into());
+        args.push(
+            "number,title,author,createdAt,url,isDraft,headRefName,state,labels,reviewDecision"
+                .into(),
+        );
 
         Ok(gh::run_gh_json(&args)?)
     })

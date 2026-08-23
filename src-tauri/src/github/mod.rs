@@ -37,6 +37,9 @@ pub struct PullRequest {
     pub state: String,
     #[serde(default, deserialize_with = "de_label_names")]
     pub labels: Vec<String>,
+    /// gh's `reviewDecision`: APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED / "".
+    #[serde(default)]
+    pub review_decision: String,
 }
 
 /// A single CI check for a PR, deserialized from `gh pr checks --json ...`.
