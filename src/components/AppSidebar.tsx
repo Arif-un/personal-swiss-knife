@@ -13,6 +13,8 @@ import {
 } from "#components/ui/sidebar.tsx";
 import { ThemeSwitch } from "#components/ThemeSwitch.tsx";
 import { navItems } from "#lib/nav.ts";
+import { cn } from "#lib/utils.ts";
+import { isLinux } from "#lib/platform.ts";
 import { useWindowDrag } from "#hooks/use-window-drag.ts";
 
 export function AppSidebar() {
@@ -22,7 +24,10 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="h-12 flex-row items-center py-0 pl-21" onMouseDown={onDrag}>
+      <SidebarHeader
+        className={cn("h-12 flex-row items-center py-0", isLinux ? "pl-2" : "pl-21")}
+        onMouseDown={onDrag}
+      >
         <SidebarTrigger className="size-[18px] min-w-[18px] -mt-0.5 rounded-full p-0 cursor-pointer hover:bg-sidebar-accent" />
       </SidebarHeader>
       <SidebarContent>

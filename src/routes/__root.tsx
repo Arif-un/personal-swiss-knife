@@ -11,6 +11,7 @@ import { TooltipProvider } from "#components/ui/tooltip.tsx";
 import { ThemeProvider } from "#hooks/use-theme.tsx";
 import { cn } from "#lib/utils.ts";
 import { navItems } from "#lib/nav.ts";
+import { isLinux } from "#lib/platform.ts";
 import { useWindowDrag } from "#hooks/use-window-drag.ts";
 
 function Header() {
@@ -26,7 +27,7 @@ function Header() {
       onMouseDown={onDrag}
       className={cn(
         "flex h-12 shrink-0 items-center gap-2 border-b px-4 transition-[padding] duration-200",
-        state === "collapsed" && "pl-21",
+        state === "collapsed" && !isLinux && "pl-21",
       )}
     >
       {state === "collapsed" && (
