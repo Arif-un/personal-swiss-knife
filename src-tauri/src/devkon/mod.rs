@@ -1,21 +1,16 @@
-//! Devkon dev-cluster deploy/destroy page (`/deploy`).
+//! Dev-cluster deploy/destroy page (`/deploy`).
 //!
-//! A list of user-managed names; each maps to an isolated devkon namespace
-//! (`{name}-dev.devkon.shared.netspring.team`). Deploy/destroy dispatch the
-//! `deploy-dev-cluster.yml` GitHub Actions workflow via `gh` (reusing the same
-//! CLI layer as the GitHub PR feature). `gh workflow run` doesn't return the
-//! dispatched run id, so after dispatch we watch `gh run list` for the ref and
-//! capture the newest run whose id differs from the pre-dispatch one, storing it
-//! per name for status lookups.
+//! A list of user-managed names; each maps to an isolated namespace whose URL is
+//! `cluster_domain` with `{name}` substituted. Deploy/destroy dispatch a GitHub
+//! Actions `workflow_dispatch` workflow (repo + workflow file configured in
+//! Settings) via `gh`, reusing the same CLI layer as the GitHub PR feature. `gh
+//! workflow run` doesn't return the dispatched run id, so after dispatch we watch
+//! `gh run list` for the ref and capture the newest run whose id differs from the
+//! pre-dispatch one, storing it per name for status lookups.
 
 pub mod commands;
 
 use serde::{Deserialize, Serialize};
-
-/// Repo hosting the deploy workflow. Deploys always target this repo.
-pub const REPO: &str = "netspringio/netspring";
-/// The `workflow_dispatch` workflow file.
-pub const WORKFLOW: &str = "deploy-dev-cluster.yml";
 
 fn default_mode() -> String {
     "full".to_string()
@@ -53,10 +48,21 @@ pub struct DevkonEntry {
     pub last_deployed_at: Option<String>,
 }
 
-/// On-disk shape of `devkon.json`.
+/// On-disk shape of `devkon.json`. Repo/workflow/domain are blank by default and
+/// set in Settings, so no org-specific target ships in the repo.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DevkonStore {
+    /// `owner/repo` hosting the deploy workflow.
+    #[serde(default)]
+    pub repo: String,
+    /// The `workflow_dispatch` workflow file name.
+    #[serde(default)]
+    pub workflow: String,
+    /// Namespace URL template; `{name}` is replaced with the entry name. Empty =
+    /// no clickable URL shown.
+    #[serde(default)]
+    pub cluster_domain: String,
     #[serde(default)]
     pub entries: Vec<DevkonEntry>,
 }

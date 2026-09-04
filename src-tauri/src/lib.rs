@@ -118,6 +118,7 @@ pub fn run() {
             devkon::commands::devkon_deploy,
             devkon::commands::devkon_destroy,
             devkon::commands::devkon_status,
+            devkon::commands::devkon_set_config,
             awsauth::commands::awsauth_get_config,
             awsauth::commands::awsauth_set_config,
             awsauth::commands::awsauth_open_brave,

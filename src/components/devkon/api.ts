@@ -23,6 +23,12 @@ export interface DevkonEntry {
 }
 
 export interface DevkonStore {
+  /** owner/repo hosting the deploy workflow (blank until configured). */
+  repo: string;
+  /** workflow_dispatch file name. */
+  workflow: string;
+  /** Namespace URL template; `{name}` is replaced with the entry name. */
+  clusterDomain: string;
   entries: DevkonEntry[];
 }
 
@@ -45,6 +51,8 @@ export const devkonApi = {
   deploy: (id: string) => invoke<DevkonEntry>("devkon_deploy", { id }),
   destroy: (id: string) => invoke<DevkonEntry>("devkon_destroy", { id }),
   status: (id: string) => invoke<RunStatus>("devkon_status", { id }),
+  setConfig: (repo: string, workflow: string, clusterDomain: string) =>
+    invoke<DevkonStore>("devkon_set_config", { repo, workflow, clusterDomain }),
 };
 
 export const devkonKeys = {

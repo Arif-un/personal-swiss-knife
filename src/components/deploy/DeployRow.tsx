@@ -8,8 +8,14 @@ import { StatusCell } from "#components/deploy/StatusCell.tsx";
 
 export const BRANCH_LIST_ID = "devkon-branches";
 
-export function accessUrl(name: string) {
-  return `https://${name}-dev.devkon.shared.netspring.team`;
+/** Resolve a namespace URL from the configured `{name}` template. Prepend
+ * https:// unless the value is already an http(s) URL. Only http(s) is honored as
+ * a pre-existing scheme: allowing any `scheme://` let a crafted `javascript:` value
+ * (restorable from an untrusted settings backup) run as an href in this
+ * csp:null webview. Anything else is forced under https://. */
+export function accessUrl(template: string, name: string) {
+  const url = template.split("{name}").join(name);
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
 }
 
 /** One editable row. Branch is controlled local state so a mode change reads the
@@ -17,6 +23,7 @@ export function accessUrl(name: string) {
  * just-typed branch, since devkon_save overwrites name/branch/mode wholesale). */
 export function DeployRow({
   entry,
+  clusterDomain,
   busy,
   onSave,
   onDeploy,
@@ -25,6 +32,8 @@ export function DeployRow({
   removePending,
 }: {
   entry: DevkonEntry;
+  /** URL template with `{name}`; empty = no link shown. */
+  clusterDomain: string;
   busy: boolean;
   onSave: (e: DevkonEntry) => void;
   onDeploy: () => void;
@@ -48,14 +57,16 @@ export function DeployRow({
       <TableCell className="font-medium align-top">
         <div className="flex flex-col gap-0.5">
           {entry.name}
-          <a
-            href={accessUrl(entry.name)}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-muted-foreground hover:text-foreground truncate max-w-[16rem]"
-          >
-            {entry.name}-dev.devkon…
-          </a>
+          {clusterDomain.trim() && (
+            <a
+              href={accessUrl(clusterDomain, entry.name)}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-muted-foreground hover:text-foreground truncate max-w-[16rem]"
+            >
+              {accessUrl(clusterDomain, entry.name).replace(/^https?:\/\//, "")}
+            </a>
+          )}
         </div>
       </TableCell>
 

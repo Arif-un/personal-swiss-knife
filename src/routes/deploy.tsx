@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createRoute } from "@tanstack/react-router";
+import { createRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { rootRoute } from "./__root.tsx";
 import { Button } from "#components/ui/button.tsx";
@@ -42,6 +42,8 @@ function DeployPage() {
   });
 
   const entries = data?.entries ?? [];
+  const clusterDomain = data?.clusterDomain ?? "";
+  const configured = Boolean(data?.repo && data?.workflow);
   const invalidateList = () => qc.invalidateQueries({ queryKey: devkonKeys.list() });
 
   const save = useMutation({
@@ -77,10 +79,24 @@ function DeployPage() {
   return (
     <div className="flex flex-col gap-6">
       <p className="text-sm text-muted-foreground">
-        Deploy and destroy isolated devkon namespaces. Each name maps to{" "}
-        <code className="text-xs">{"{name}"}-dev.devkon.shared.netspring.team</code> and dispatches
-        the <code className="text-xs">deploy-dev-cluster.yml</code> workflow.
+        Deploy and destroy isolated namespaces. Each name is substituted into your{" "}
+        <code className="text-xs">{"{name}"}</code> URL template and dispatches the configured
+        workflow. Set the repo, workflow, and URL template in{" "}
+        <Link to="/settings" className="underline hover:text-foreground">
+          Settings
+        </Link>
+        .
       </p>
+
+      {!configured && (
+        <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+          No deploy target configured yet. Add the repo and workflow in{" "}
+          <Link to="/settings" className="underline hover:text-foreground">
+            Settings
+          </Link>{" "}
+          to enable deploys.
+        </p>
+      )}
 
       <AwsLoginPanel />
 
@@ -141,6 +157,7 @@ function DeployPage() {
               <DeployRow
                 key={entry.id}
                 entry={entry}
+                clusterDomain={clusterDomain}
                 busy={busyIds.has(entry.id)}
                 onSave={(e) => save.mutate(e)}
                 onDeploy={() => dispatch(deploy, entry.id)}

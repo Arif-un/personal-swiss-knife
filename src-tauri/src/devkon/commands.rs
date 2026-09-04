@@ -10,7 +10,7 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::github::gh::{run_gh, run_gh_json};
 
-use super::{mode_params, DevkonEntry, DevkonStore, RunStatus, REPO, WORKFLOW};
+use super::{mode_params, DevkonEntry, DevkonStore, RunStatus};
 
 fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -98,17 +98,52 @@ struct RunView {
     updated_at: String,
 }
 
+/// Hold the deploy repo to `owner/repo` (or `host/owner/repo`) with a safe
+/// charset. The value feeds `gh -R <repo>` and is restorable verbatim from an
+/// untrusted imported backup; argv already blocks shell injection, but this
+/// catches a garbage/typo'd or option-shaped target early with a clear error
+/// (mirrors validate_namespace) instead of a confusing gh failure or a deploy
+/// aimed at an unexpected repo.
+fn validate_repo(repo: &str) -> Result<(), String> {
+    let segs: Vec<&str> = repo.split('/').collect();
+    let ok = (segs.len() == 2 || segs.len() == 3)
+        && segs.iter().all(|s| {
+            !s.is_empty()
+                && !s.starts_with('-')
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_')
+        });
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "deploy repo must be owner/repo (safe characters only): {repo}"
+        ))
+    }
+}
+
+/// Repo + workflow must be configured (Settings) before any gh call.
+fn require_target(store: &DevkonStore) -> Result<(&str, &str), String> {
+    let repo = store.repo.trim();
+    let workflow = store.workflow.trim();
+    if repo.is_empty() || workflow.is_empty() {
+        return Err("deploy repo/workflow not set — configure them in Settings".into());
+    }
+    validate_repo(repo)?;
+    Ok((repo, workflow))
+}
+
 /// Newest workflow run on `branch`, or `None` if the branch has no runs.
 /// Propagates gh errors (distinct from "no runs") so a failed lookup can't be
 /// mistaken for an empty branch.
-fn newest_run(branch: &str) -> Result<Option<RunListItem>, String> {
+fn newest_run(repo: &str, workflow: &str, branch: &str) -> Result<Option<RunListItem>, String> {
     let runs: Vec<RunListItem> = run_gh_json([
         "run",
         "list",
         "--workflow",
-        WORKFLOW,
+        workflow,
         "-R",
-        REPO,
+        repo,
         "-b",
         branch,
         "-L",
@@ -123,6 +158,26 @@ fn newest_run(branch: &str) -> Result<Option<RunListItem>, String> {
 pub fn devkon_list(window: WebviewWindow, app: AppHandle) -> Result<DevkonStore, String> {
     crate::security::require_main(&window)?;
     load(&store_path(&app)?)
+}
+
+/// Save the deploy target config (repo / workflow / cluster domain), preserving
+/// the managed entry list. Returns the updated store.
+#[tauri::command]
+pub fn devkon_set_config(
+    window: WebviewWindow,
+    app: AppHandle,
+    repo: String,
+    workflow: String,
+    cluster_domain: String,
+) -> Result<DevkonStore, String> {
+    crate::security::require_main(&window)?;
+    let path = store_path(&app)?;
+    update_store(&path, |store| {
+        store.repo = repo.trim().to_string();
+        store.workflow = workflow.trim().to_string();
+        store.cluster_domain = cluster_domain.trim().to_string();
+        store.clone()
+    })
 }
 
 /// Upsert an entry. A blank `id` creates a new one (assigns an id); an existing
@@ -167,13 +222,23 @@ pub fn devkon_delete(window: WebviewWindow, app: AppHandle, id: String) -> Resul
 
 /// All branch names of the deploy repo, for the per-row branch picker.
 #[tauri::command]
-pub async fn devkon_branches(window: WebviewWindow) -> Result<Vec<String>, String> {
+pub async fn devkon_branches(window: WebviewWindow, app: AppHandle) -> Result<Vec<String>, String> {
     crate::security::require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(|| {
+    let store = load(&store_path(&app)?)?;
+    // Only the repo is needed to enumerate branches; don't require the workflow
+    // (require_target mandates both), so branch autocomplete works as soon as the
+    // repo is set.
+    let repo = store.repo.trim();
+    if repo.is_empty() {
+        return Err("deploy repo not set — configure it in Settings".into());
+    }
+    validate_repo(repo)?;
+    let repo = repo.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
         // per_page=100 + --paginate: fewer round-trips than the default 30/page.
         // ponytail: fetches every branch; fine for react-query-cached use, slow
         // only on a repo with thousands of branches.
-        let path = format!("repos/{REPO}/branches?per_page=100");
+        let path = format!("repos/{repo}/branches?per_page=100");
         let out = run_gh(["api", path.as_str(), "--paginate", "-q", ".[].name"])?;
         let mut names: Vec<String> = out
             .lines()
@@ -217,6 +282,8 @@ pub async fn devkon_destroy(
 fn dispatch(app: &AppHandle, id: &str, cmd: &str) -> Result<DevkonEntry, String> {
     let path = store_path(app)?;
     let store = load(&path)?;
+    let (repo, workflow) = require_target(&store)?;
+    let (repo, workflow) = (repo.to_string(), workflow.to_string());
     let entry = store
         .entries
         .iter()
@@ -230,14 +297,14 @@ fn dispatch(app: &AppHandle, id: &str, cmd: &str) -> Result<DevkonEntry, String>
     let (type_, clean) = mode_params(&entry.mode);
     // Baseline before dispatch. A gh failure here aborts before we trigger the
     // workflow, so we never mistake a pre-existing run for the one we launched.
-    let before = newest_run(&entry.branch)?.map(|r| r.database_id);
+    let before = newest_run(&repo, &workflow, &entry.branch)?.map(|r| r.database_id);
 
     run_gh([
         "workflow",
         "run",
-        WORKFLOW,
+        &workflow,
         "-R",
-        REPO,
+        &repo,
         "--ref",
         &entry.branch,
         "-f",
@@ -258,7 +325,7 @@ fn dispatch(app: &AppHandle, id: &str, cmd: &str) -> Result<DevkonEntry, String>
     for _ in 0..6 {
         std::thread::sleep(Duration::from_secs(2));
         // Ignore transient poll errors; a later iteration (or a status poll) retries.
-        if let Ok(Some(r)) = newest_run(&entry.branch) {
+        if let Ok(Some(r)) = newest_run(&repo, &workflow, &entry.branch) {
             if Some(r.database_id) != before {
                 created = Some(r);
                 break;
@@ -311,6 +378,8 @@ pub async fn devkon_status(
 fn status_blocking(app: &AppHandle, id: &str) -> Result<RunStatus, String> {
     let path = store_path(app)?;
     let store = load(&path)?;
+    let (repo, workflow) = require_target(&store)?;
+    let (repo, workflow) = (repo.to_string(), workflow.to_string());
     let mut entry = store
         .entries
         .iter()
@@ -321,7 +390,7 @@ fn status_blocking(app: &AppHandle, id: &str) -> Result<RunStatus, String> {
     // Awaiting = a dispatch happened (kind set) but its run id was never captured
     // within the watch window. Try to adopt the first run newer than the baseline.
     if entry.last_run_id.is_none() && entry.last_run_kind.is_some() {
-        if let Some(r) = newest_run(&entry.branch)? {
+        if let Some(r) = newest_run(&repo, &workflow, &entry.branch)? {
             if Some(r.database_id) != entry.baseline_run_id {
                 entry.last_run_id = Some(r.database_id);
                 entry.last_run_url = Some(r.url);
@@ -349,7 +418,7 @@ fn status_blocking(app: &AppHandle, id: &str) -> Result<RunStatus, String> {
         "view",
         &run_id.to_string(),
         "-R",
-        REPO,
+        &repo,
         "--json",
         "status,conclusion,updatedAt",
     ])?;
@@ -375,4 +444,27 @@ fn status_blocking(app: &AppHandle, id: &str) -> Result<RunStatus, String> {
         conclusion: view.conclusion,
         last_deployed_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_repo;
+
+    #[test]
+    fn repo_guard_accepts_slugs_rejects_tricks() {
+        for ok in ["owner/repo", "my-org/my.repo_1", "ghe.example.com/org/repo"] {
+            assert!(validate_repo(ok).is_ok(), "{ok} should pass");
+        }
+        for bad in [
+            "",
+            "repo",
+            "owner/",
+            "/repo",
+            "-owner/repo",
+            "a/b; rm -rf /",
+            "o/r/x/y",
+        ] {
+            assert!(validate_repo(bad).is_err(), "{bad} should fail");
+        }
+    }
 }
