@@ -108,6 +108,8 @@ pub fn run() {
             memtrack::commands::memory_snapshot_now,
             utils::commands::cisco_status,
             utils::commands::cisco_set_enabled,
+            utils::commands::cisco_get_config,
+            utils::commands::cisco_set_config,
             utils::commands::pick_directory,
             devkon::commands::devkon_list,
             devkon::commands::devkon_save,

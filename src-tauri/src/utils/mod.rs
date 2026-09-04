@@ -10,14 +10,49 @@
 
 pub mod commands;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Umbrella profile. Present = module active; absent (moved aside) = disabled.
-const ORGINFO: &str = "/opt/cisco/secureclient/umbrella/OrgInfo.json";
-const ORGINFO_OFF: &str = "/opt/cisco/secureclient/umbrella/OrgInfo.json.disabled";
+fn default_orginfo() -> String {
+    "/opt/cisco/secureclient/umbrella/OrgInfo.json".to_string()
+}
+fn default_orginfo_off() -> String {
+    "/opt/cisco/secureclient/umbrella/OrgInfo.json.disabled".to_string()
+}
 /// launchd daemon running vpnagentd, which spawns and keeps alive acumbrellaagent.
-const DAEMON_LABEL: &str = "com.cisco.secureclient.vpn.service.agent";
-const DAEMON_PLIST: &str = "/opt/cisco/secureclient/bin/Cisco Secure Client - AnyConnect VPN Service.app/Contents/Library/LaunchDaemons/com.cisco.secureclient.vpn.service.agent.plist";
+fn default_daemon_label() -> String {
+    "com.cisco.secureclient.vpn.service.agent".to_string()
+}
+fn default_daemon_plist() -> String {
+    "/opt/cisco/secureclient/bin/Cisco Secure Client - AnyConnect VPN Service.app/Contents/Library/LaunchDaemons/com.cisco.secureclient.vpn.service.agent.plist".to_string()
+}
+
+/// On-disk shape of `cisco.json`. Defaults are the standard macOS Cisco Secure
+/// Client install paths (not org-specific); editable in Settings for non-default
+/// installs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CiscoConfig {
+    #[serde(default = "default_orginfo")]
+    pub orginfo: String,
+    #[serde(default = "default_orginfo_off")]
+    pub orginfo_off: String,
+    #[serde(default = "default_daemon_label")]
+    pub daemon_label: String,
+    #[serde(default = "default_daemon_plist")]
+    pub daemon_plist: String,
+}
+
+impl Default for CiscoConfig {
+    fn default() -> Self {
+        Self {
+            orginfo: default_orginfo(),
+            orginfo_off: default_orginfo_off(),
+            daemon_label: default_daemon_label(),
+            daemon_plist: default_daemon_plist(),
+        }
+    }
+}
 
 /// Snapshot of Cisco Umbrella state for the `/utils` page.
 #[derive(Debug, Clone, Serialize)]
