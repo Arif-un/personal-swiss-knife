@@ -21,9 +21,14 @@ fn all_hosts(app: &AppHandle) -> Result<Vec<Host>, String> {
 
 /// Reject control characters / newlines in single-line host fields so a saved
 /// host can never inject extra directives into `~/.ssh/config` (e.g. a newline
-/// followed by `ProxyCommand`). `extra_options` is intentionally multi-line and
-/// is validated only for an empty alias / carriage returns.
-fn validate_host(host: &Host) -> Result<(), String> {
+/// followed by `ProxyCommand`). Also rejects a leading `-` on any field that
+/// becomes an ssh/scp target token (`alias`, `hostname`, `user`): `wpdeploy`
+/// passes the resolved target positionally and OpenSSH has no `--` terminator,
+/// so `-oProxyCommand=…` in one of those fields would be parsed as an option and
+/// run a local command. `extra_options` is intentionally multi-line and is
+/// validated only for an empty alias / carriage returns. `pub(crate)` so the
+/// settings import path can reuse it as its trust-boundary check.
+pub(crate) fn validate_host(host: &Host) -> Result<(), String> {
     fn ok_single_line(value: &str) -> bool {
         !value.chars().any(|c| c.is_control())
     }
@@ -44,6 +49,17 @@ fn validate_host(host: &Host) -> Result<(), String> {
     for (label, value) in single_line {
         if !ok_single_line(value) {
             return Err(format!("{label} must not contain control characters"));
+        }
+    }
+    // Option-injection guard: a target token starting with `-` is read as an ssh
+    // flag, not a host. Reject it on every field that can reach `target()`.
+    for (label, value) in [
+        ("alias", host.alias.as_str()),
+        ("hostname", host.hostname.as_str()),
+        ("user", host.user.as_str()),
+    ] {
+        if value.starts_with('-') {
+            return Err(format!("{label} must not start with '-'"));
         }
     }
     if let Some(pj) = &host.proxy_jump {
