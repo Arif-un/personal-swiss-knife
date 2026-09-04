@@ -7,7 +7,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use tauri::{AppHandle, Manager, WebviewWindow};
 
-use super::{AwsAuthConfig, AWSAUTH_REL, CREDENTIALS_REL, LOGIN_URL};
+use super::{AwsAuthConfig, AWSAUTH_REL, CREDENTIALS_REL};
 
 /// How long to wait for the Docker daemon to come up after launching it. Cold
 /// starts of Docker Desktop can take well over a minute on first boot.
@@ -64,6 +64,16 @@ pub fn awsauth_set_config(
 pub fn awsauth_open_brave(window: WebviewWindow, app: AppHandle) -> Result<Option<u64>, String> {
     crate::security::require_main(&window)?;
     let cfg = load(&config_path(&app)?);
+    let login_url = cfg.login_url.trim();
+    if login_url.is_empty() {
+        return Err("AWS SAML login URL is not set. Configure it in Settings.".into());
+    }
+    // Must be a real web URL: passed as a positional Brave arg, so a value starting
+    // with `--` would be parsed as a Chromium switch (e.g. --renderer-cmd-prefix =
+    // arbitrary command execution). Restricting to http(s):// closes that.
+    if !login_url.starts_with("https://") && !login_url.starts_with("http://") {
+        return Err("AWS SAML login URL must start with https:// or http://".into());
+    }
     let repo_dir = PathBuf::from(cfg.repo_dir.trim());
     if !repo_dir.join(AWSAUTH_REL).is_file() {
         return Err(format!(
@@ -73,7 +83,7 @@ pub fn awsauth_open_brave(window: WebviewWindow, app: AppHandle) -> Result<Optio
     }
     let profile_dir = resolve_brave_profile_dir(cfg.brave_profile.trim())?;
     let baseline = mtime_millis(&home()?.join(CREDENTIALS_REL));
-    open_brave(&profile_dir)?;
+    open_brave(&profile_dir, login_url)?;
     Ok(baseline)
 }
 
@@ -137,14 +147,14 @@ fn resolve_brave_profile_dir(display: &str) -> Result<String, String> {
 
 /// Open the login URL twice (two tabs) in the chosen Brave profile. Launching the
 /// binary directly targets the profile and forwards the URLs to a running Brave.
-fn open_brave(profile_dir: &str) -> Result<(), String> {
+fn open_brave(profile_dir: &str, login_url: &str) -> Result<(), String> {
     if !Path::new(BRAVE_BIN).exists() {
         return Err(format!("Brave not found at {BRAVE_BIN}"));
     }
     Command::new(BRAVE_BIN)
         .arg(format!("--profile-directory={profile_dir}"))
-        .arg(LOGIN_URL)
-        .arg(LOGIN_URL)
+        .arg(login_url)
+        .arg(login_url)
         .spawn()
         .map_err(|e| format!("failed to launch Brave: {e}"))?;
     Ok(())

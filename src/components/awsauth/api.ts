@@ -6,6 +6,8 @@ export interface AwsAuthConfig {
   braveProfile: string;
   /** Repo root to run tools/awsauth from. */
   repoDir: string;
+  /** SAML/SSO login URL opened in Brave (blank until configured in Settings). */
+  loginUrl: string;
 }
 
 export const awsauthApi = {

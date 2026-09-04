@@ -32,7 +32,13 @@ export function AwsLoginPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: awsauthKeys.config() }),
   });
   const persist = () => {
-    const next = { braveProfile: profile.trim(), repoDir: repoDir.trim() };
+    // loginUrl is edited in Settings, not here — carry it through so a save from
+    // this panel never wipes it.
+    const next = {
+      braveProfile: profile.trim(),
+      repoDir: repoDir.trim(),
+      loginUrl: config?.loginUrl ?? "",
+    };
     if (config && (next.braveProfile !== config.braveProfile || next.repoDir !== config.repoDir))
       saveConfig.mutate(next);
   };
@@ -41,7 +47,14 @@ export function AwsLoginPanel() {
     const dir = await pickDirectory();
     if (!dir) return;
     setRepoDir(dir);
-    saveConfig.mutate({ braveProfile: profile.trim(), repoDir: dir });
+    // Don't save until config has loaded, else loginUrl (edited in Settings) gets
+    // overwritten with "" — awsauth_set_config rewrites the whole file.
+    if (!config) return;
+    saveConfig.mutate({
+      braveProfile: profile.trim(),
+      repoDir: dir,
+      loginUrl: config.loginUrl,
+    });
   }
 
   // Credentials-download wait: the countdown/cancel loop lives here (frontend) so
@@ -144,7 +157,7 @@ export function AwsLoginPanel() {
                   value={repoDir}
                   onChange={(e) => setRepoDir(e.target.value)}
                   onBlur={persist}
-                  placeholder="/Volumes/workspace/netspring"
+                  placeholder="/path/to/repo"
                   aria-label="Repo directory"
                   className="h-7 w-72"
                 />
