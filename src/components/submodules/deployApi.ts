@@ -13,6 +13,8 @@ export interface Product {
   group: string;
   slug: string;
   isLite: boolean;
+  /** Group has a separate local asset build (offer a build-first toggle). */
+  buildable: boolean;
 }
 
 /** One streamed output line for a running deploy. */

@@ -9,7 +9,8 @@ import { sshApi, sshKeys } from "#components/ssh/api.ts";
 
 /**
  * Per-repo deploy control. Loads the repo's deployable products; repos with no
- * products render nothing. One product deploys directly, several open a list.
+ * mapping show a "configure in Settings" hint. One product deploys directly,
+ * several open a list.
  * Build assets toggle applies to envira/soliloquy/cdn (ignored elsewhere).
  */
 export function DeployButton({
@@ -38,7 +39,11 @@ export function DeployButton({
     null,
   );
 
-  const { data: products } = useQuery({
+  const {
+    data: products,
+    isError: productsError,
+    error: productsErr,
+  } = useQuery({
     queryKey: wpDeployKeys.products(enviraDev, repo),
     queryFn: () => wpDeployApi.products(enviraDev, repo),
     enabled: enviraDev.trim().length > 0,
@@ -55,12 +60,10 @@ export function DeployButton({
   const targetHost = hosts?.find((h) => h.id === config?.targetHostId);
   const hostLabel = targetHost ? targetHost.alias || targetHost.hostname : "the target host";
 
-  // Repo ships nothing deployable → no icon.
-  if (products && products.length === 0) return null;
-
-  // Only envira/soliloquy/cdn have a separate asset build; nextgen + theme
-  // build during the zip step, so the toggle is irrelevant there.
-  const buildable = !!products && ["envira", "soliloquy", "cdn"].includes(products[0]?.group);
+  // Whether this product needs a separate asset build (nextgen + theme build
+  // during the zip step). Decided by the backend so the vocabulary lives in one
+  // place instead of a hardcoded list here that drifts from the deploy logic.
+  const buildable = !!products?.[0]?.buildable;
 
   function confirmPending() {
     if (!pending) return;
@@ -109,8 +112,39 @@ export function DeployButton({
               Open deploy settings
             </Button>
           </div>
+        ) : productsError ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-destructive">
+              {productsErr instanceof Error ? productsErr.message : "Failed to load products."}
+            </p>
+            <Button
+              size="sm"
+              onClick={() => {
+                setOpen(false);
+                onOpenSettings();
+              }}
+            >
+              Open deploy settings
+            </Button>
+          </div>
         ) : !products ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : products.length === 0 ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">
+              No products mapped for <span className="font-mono">{repo}</span>. Add it to the
+              product map in Settings.
+            </p>
+            <Button
+              size="sm"
+              onClick={() => {
+                setOpen(false);
+                onOpenSettings();
+              }}
+            >
+              Open deploy settings
+            </Button>
+          </div>
         ) : pending ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm font-medium">

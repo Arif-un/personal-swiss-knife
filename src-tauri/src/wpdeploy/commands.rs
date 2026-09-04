@@ -13,8 +13,8 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 use crate::ssh::{config as ssh_config, current_user, expand_tilde, Host, HostSource};
 
-use super::products::{products_for_repo, resolve_slug, THEME_SLUG};
-use super::{DoneEvent, LogLine, Product, WpDeployConfig, EVENT_DONE, EVENT_LOG};
+use super::products::{products_for_repo, resolve_slug};
+use super::{DoneEvent, LogLine, Product, RepoMapping, WpDeployConfig, EVENT_DONE, EVENT_LOG};
 
 // ------------------------------------------------------------------ config store
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -312,6 +312,13 @@ fn zip_top_dir(zip: &Path) -> Option<String> {
 }
 
 // ------------------------------------------------------------------ deploy build helpers
+/// Whether a group has a separate local asset build (so the UI offers a "Build
+/// assets first" toggle). Single source of truth for that vocabulary — keep in
+/// sync with `build_command_for`'s arms; the frontend reads it via `Product`.
+pub fn group_is_buildable(group: &str) -> bool {
+    matches!(group, "envira" | "soliloquy" | "cdn")
+}
+
 /// Local `yarn` build command for groups whose zip does NOT self-build
 /// (envira/soliloquy/cdn). NextGen + theme return None (their zip builds).
 fn build_command_for(envira_dev: &str, group: &str, is_lite: bool) -> Option<Command> {
@@ -394,7 +401,16 @@ pub fn wpdeploy_config_reset(
     app: AppHandle,
 ) -> Result<WpDeployConfig, String> {
     crate::security::require_main(&window)?;
-    let cfg = WpDeployConfig::default();
+    // Clear only the deploy settings this button owns; the product map
+    // (theme_slug/slugs_rel_path/repo_map) is configured on the Settings page and
+    // must survive a reset here, or all future deploys silently break. On a corrupt
+    // config fall back to default rather than erroring — Reset is the recovery path,
+    // so it must run even when the file can't be parsed (product map is unrecoverable
+    // in that case anyway).
+    let mut cfg = load_config(&app).unwrap_or_default();
+    cfg.target_host_id = String::new();
+    cfg.zip_base = String::new();
+    cfg.docroots.clear();
     save_config(&app, &cfg)?;
     Ok(cfg)
 }
@@ -403,11 +419,40 @@ pub fn wpdeploy_config_reset(
 #[tauri::command]
 pub fn wpdeploy_products(
     window: WebviewWindow,
+    app: AppHandle,
     envira_dev: String,
     repo: String,
 ) -> Result<Vec<Product>, String> {
     crate::security::require_main(&window)?;
-    products_for_repo(envira_dev.trim(), repo.trim())
+    let cfg = load_config(&app)?;
+    products_for_repo(&cfg, envira_dev.trim(), repo.trim())
+}
+
+/// Save the product map config (theme slug, slugs JSON path, repo->group map),
+/// preserving host/zip/docroot settings. Returns the updated config.
+#[tauri::command]
+pub fn wpdeploy_set_products(
+    window: WebviewWindow,
+    app: AppHandle,
+    theme_slug: String,
+    slugs_rel_path: String,
+    repo_map: Vec<RepoMapping>,
+) -> Result<WpDeployConfig, String> {
+    crate::security::require_main(&window)?;
+    let mut cfg = load_config(&app)?;
+    cfg.theme_slug = theme_slug.trim().to_string();
+    cfg.slugs_rel_path = slugs_rel_path.trim().to_string();
+    cfg.repo_map = repo_map
+        .into_iter()
+        .map(|m| RepoMapping {
+            repo: m.repo.trim().to_string(),
+            group: m.group.trim().to_string(),
+            kind: m.kind.trim().to_string(),
+        })
+        .filter(|m| !m.repo.is_empty())
+        .collect();
+    save_config(&app, &cfg)?;
+    Ok(cfg)
 }
 
 /// Scan `~/web/*` on the target host for `wp-config.php` and return candidate
@@ -466,11 +511,19 @@ fn run_deploy(
     deploy_id: &str,
 ) -> Result<Option<String>, String> {
     if envira_dev.is_empty() {
-        return Err("envira-dev path not set (top of Submodules page)".into());
+        return Err("monorepo path not set (top of Submodules page)".into());
     }
-    let (group, is_lite) = resolve_slug(envira_dev, slug)?;
-    ensure_safe_slug(slug)?;
     let cfg = load_config(app)?;
+    let (group, is_lite) = resolve_slug(&cfg, envira_dev, slug)?;
+    // Theme handling keys off the configured theme slug, not the group name: the
+    // group is user-free-text (Settings), so a theme mapping named anything other
+    // than "theme" must still take the per-brand-zip path.
+    let is_theme = !cfg.theme_slug.trim().is_empty() && slug == cfg.theme_slug;
+    ensure_safe_slug(slug)?;
+    // `group` is user-free-text (repo map) and becomes a path component of
+    // `out_dir` below, whose *.zip files are deleted — guard it against `..`
+    // traversal exactly like the slug.
+    ensure_safe_slug(&group)?;
     if cfg.zip_base.trim().is_empty() {
         return Err("zip base dir not set — configure it in deploy settings".into());
     }
@@ -503,6 +556,20 @@ fn run_deploy(
     if build {
         if let Some(cmd) = build_command_for(envira_dev, &group, is_lite) {
             run_streaming(app, deploy_id, &format!("Building {group} assets"), cmd)?;
+        } else {
+            // Build was requested but no local build command exists for this group
+            // (the resolved group — the product-slugs JSON key — isn't one of the
+            // buildable set). Warn instead of silently shipping unbuilt assets to
+            // the live site, so a group/mapping mismatch is visible.
+            emit_log(
+                app,
+                deploy_id,
+                "step",
+                &format!(
+                    "No local asset build for group '{group}' — deploying zip as-is. \
+                     Check the product-slugs group name in Settings if this needs a prebuild."
+                ),
+            );
         }
     }
 
@@ -528,7 +595,7 @@ fn run_deploy(
         .env("PATH", child_path());
     run_streaming(app, deploy_id, &format!("Zipping {slug}"), zip_cmd)?;
 
-    let zips: Vec<PathBuf> = if group == "theme" {
+    let zips: Vec<PathBuf> = if is_theme {
         // imagely-theme emits one zip per brand.
         let mut v: Vec<PathBuf> = std::fs::read_dir(&out_dir)
             .map_err(|e| e.to_string())?
@@ -567,7 +634,7 @@ fn run_deploy(
             scp_command(&host, zip, &remote_zip),
         )?;
 
-        if group == "theme" {
+        if is_theme {
             // Best-effort restore point before force-overwriting the live theme.
             backup_theme(app, deploy_id, &host, &docroot, &backups_root, zip)?;
             run_streaming(
@@ -881,7 +948,7 @@ fn run_rollback(app: &AppHandle, slug: &str, deploy_id: &str) -> Result<(), Stri
     // Themes install into wp-content/themes (one dir per brand, backed up under
     // `{bdir}/themes/{brand}`) and the deploy never activates them — so roll each
     // backed-up brand back into themes and flush, no `wp theme activate`.
-    if slug == THEME_SLUG {
+    if !cfg.theme_slug.trim().is_empty() && slug == cfg.theme_slug {
         let themes = format!("{docroot}/wp-content/themes");
         let root = format!("{bdir}/themes");
         let listing = run_capture(ssh_command(

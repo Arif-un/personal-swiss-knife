@@ -22,6 +22,21 @@ pub const EVENT_LOG: &str = "wpdeploy://log";
 /// Tauri event: a deploy/rollback finished (success or failure).
 pub const EVENT_DONE: &str = "wpdeploy://done";
 
+/// Maps a submodule repo folder to the product group it ships. Replaces the old
+/// hardcoded, org-specific match so the whole product map is user-editable and
+/// nothing product-specific ships in the repo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoMapping {
+    /// Submodule folder name (e.g. `envira-gallery-lite`).
+    pub repo: String,
+    /// Product group key — must match a key in the monorepo's product-slugs JSON
+    /// (ignored for `theme`).
+    pub group: String,
+    /// `lite` | `pro` | `theme`.
+    pub kind: String,
+}
+
 /// Persisted deploy settings (`wpdeploy.json` in the app data dir).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +50,17 @@ pub struct WpDeployConfig {
     /// WordPress docroot per host id (host store has no docroot field).
     #[serde(default)]
     pub docroots: std::collections::HashMap<String, String>,
+    /// Theme product slug (the theme is not in the product-slugs JSON). Empty =
+    /// no theme product.
+    #[serde(default)]
+    pub theme_slug: String,
+    /// Path to the product-slugs JSON, relative to the monorepo root. Empty = no
+    /// plugin products resolvable.
+    #[serde(default)]
+    pub slugs_rel_path: String,
+    /// Repo-folder -> product-group map. Empty = nothing deployable until set.
+    #[serde(default)]
+    pub repo_map: Vec<RepoMapping>,
 }
 
 /// One deployable product inside a repo (a plugin slug, or the theme).
@@ -46,6 +72,8 @@ pub struct Product {
     /// The `yarn actions zip` target slug.
     pub slug: String,
     pub is_lite: bool,
+    /// Group has a separate local asset build (UI offers a build-first toggle).
+    pub buildable: bool,
 }
 
 /// One streamed output line for a running deploy, tagged with its deploy id so
