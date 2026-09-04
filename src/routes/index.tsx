@@ -1,13 +1,15 @@
 import { createRoute, Link } from "@tanstack/react-router";
 import { rootRoute } from "./__root.tsx";
 import { navItems } from "#lib/nav.ts";
+import { useBranding } from "#hooks/use-branding.tsx";
 
 function HomePage() {
+  const { branding } = useBranding();
   const tools = navItems.filter((item) => item.description);
 
   return (
     <div className="flex flex-col gap-3">
-      <h1 className="text-xl font-bold">Welcome to Swiss Knife</h1>
+      <h1 className="text-xl font-bold">Welcome to {branding.displayName}</h1>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {tools.map((tool) => (
           <Link

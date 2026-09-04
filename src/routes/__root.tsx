@@ -9,6 +9,7 @@ import {
 } from "#components/ui/sidebar.tsx";
 import { TooltipProvider } from "#components/ui/tooltip.tsx";
 import { ThemeProvider } from "#hooks/use-theme.tsx";
+import { BrandingProvider, useBranding } from "#hooks/use-branding.tsx";
 import { cn } from "#lib/utils.ts";
 import { navItems } from "#lib/nav.ts";
 import { useWindowDrag } from "#hooks/use-window-drag.ts";
@@ -16,6 +17,7 @@ import { useWindowDrag } from "#hooks/use-window-drag.ts";
 function Header() {
   const { state } = useSidebar();
   const onDrag = useWindowDrag();
+  const { branding } = useBranding();
   const pathname = useRouterState({
     select: (s) => s.location.pathname,
   });
@@ -33,7 +35,7 @@ function Header() {
         <SidebarTrigger className="size-[18px] min-w-[18px] rounded-full p-0 [&_svg]:size-3.5 -mt-0.5 cursor-pointer" />
       )}
       <span className="flex items-center gap-1 text-lg font-bold">
-        Swiss Knife
+        {branding.displayName}
         {title && title !== "Home" && (
           <span className="flex items-center gap-1 font-normal text-muted-foreground">
             <ChevronRightIcon className="size-4" />
@@ -50,17 +52,19 @@ function Header() {
 function RootLayout() {
   return (
     <ThemeProvider>
-      <TooltipProvider>
-        <SidebarProvider>
-          <AppSidebar />
-          <SidebarInset className="min-w-0 overflow-x-hidden bg-background">
-            <Header />
-            <div className="min-w-0 flex-1 px-4 py-6">
-              <Outlet />
-            </div>
-          </SidebarInset>
-        </SidebarProvider>
-      </TooltipProvider>
+      <BrandingProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <SidebarInset className="min-w-0 overflow-x-hidden bg-background">
+              <Header />
+              <div className="min-w-0 flex-1 px-4 py-6">
+                <Outlet />
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+        </TooltipProvider>
+      </BrandingProvider>
     </ThemeProvider>
   );
 }

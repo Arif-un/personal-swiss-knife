@@ -9,6 +9,7 @@
     "dialog:allow-open",
     "core:window:allow-start-dragging",
     "core:window:allow-set-theme",
+    "core:window:allow-set-title",
     "window-state:default"
   ]
 }

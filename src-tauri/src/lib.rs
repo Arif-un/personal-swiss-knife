@@ -5,6 +5,7 @@ mod gitmod;
 mod memtrack;
 mod messenger;
 mod security;
+mod settings;
 mod ssh;
 mod utils;
 mod wpdeploy;
@@ -139,6 +140,11 @@ pub fn run() {
             wpdeploy::commands::wpdeploy_detect_docroot,
             wpdeploy::commands::wpdeploy_deploy,
             wpdeploy::commands::wpdeploy_rollback,
+            wpdeploy::commands::wpdeploy_set_products,
+            settings::commands::branding_get,
+            settings::commands::branding_set,
+            settings::commands::settings_export,
+            settings::commands::settings_import,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

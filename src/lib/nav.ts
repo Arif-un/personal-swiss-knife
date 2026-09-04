@@ -5,6 +5,7 @@ import {
   HomeIcon,
   MessageCircleIcon,
   RocketIcon,
+  SettingsIcon,
   TerminalIcon,
   WrenchIcon,
   type LucideIcon,
@@ -62,6 +63,12 @@ export const navItems: NavItem[] = [
     title: "Deploy",
     path: "/deploy",
     icon: RocketIcon,
-    description: "Deploy and destroy devkon dev clusters per name.",
+    description: "Deploy and destroy dev clusters per name.",
+  },
+  {
+    title: "Settings",
+    path: "/settings",
+    icon: SettingsIcon,
+    description: "Branding, feature targets, and backup/restore of all settings.",
   },
 ];

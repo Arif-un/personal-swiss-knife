@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "personal-swiss-knife",
+        "title": "Swiss Knife",
         "width": 800,
         "height": 600,
         "acceptFirstMouse": true,
